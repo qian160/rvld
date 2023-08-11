@@ -1,19 +1,26 @@
-#![feature(pattern)]
+#![allow(non_snake_case)]
+#![deny(unused)]
 mod utils;
 mod linker;
-use linker::elf::*;
 
 use linker::checkMagic;
-use std::{env, fs::{File, self}};
+use std::{env, fs};
+use crate::utils::print;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    assert!(args.len() >= 2, "need an argument");
+    assert!(args.len() >= 2, "{}", color_text!("need an argument", 31));
 
     let file = &args[1];
-    let contents = fs::read(file)
-        .expect(&format!("{}: not found!", file));
+    if let Ok(contents) = fs::read(file)
+    {
+        assert!(checkMagic(&contents), "{}", color_text!("not an ELF file!", 91));
+    }
+    else{
+        error!("{}: not found!", file);
+    }
 
-    assert!(checkMagic(&contents));
-    println!("{}", color_text!("ok", 32));
+    let file = linker::file::newFile(file);
+    let inputFile = linker::inputfile::NewInputFile(file);
+    println!("#sections = {}", inputFile.ElfSections.len());
 }

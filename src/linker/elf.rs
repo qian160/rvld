@@ -1,9 +1,12 @@
-#[derive(Default)]
+pub const EhdrSize: usize = core::mem::size_of::<Ehdr>();
+pub const ShdrSize: usize = core::mem::size_of::<Shdr>();
+
+#[derive(Default, Debug)]
 #[allow(non_snake_case)]
 pub struct Ehdr {
 	pub Ident:      [u8; 16],
-	pub Type:       u32,
-	pub Machine:    u32,
+	pub Type:       u16,
+	pub Machine:    u16,
 	pub Version:    u32,
 	pub Entry:      u64,
 	pub PhOff:      u64,
@@ -16,19 +19,18 @@ pub struct Ehdr {
 	pub ShNum:      u16,
 	pub ShStrndx:   u16,
 }
-/* 
-#[derive(Default)]
+
+#[derive(Default, Debug)]
 #[allow(non_snake_case)]
 pub struct Shdr{
-	Name        :u32,
-	Type        :u32,
-	Flags       :u64,
-	Addr        :u64,
-	Offset      :u64,
-	Size        :u64,
-	Link        :u32,
-	Info        :u32,
-	AddrAlign   :u64,
-	EntSize     :u64,
+	pub Name:       u32,
+	pub Type:       u32,
+	pub Flags:      u64,
+	pub Addr:       u64,
+	pub Offset:     u64,
+	pub Size:       u64,
+	pub Link:       u32,
+	pub Info:       u32,
+	pub AddrAlign:  u64,
+	pub EntSize:    u64,
 }
-*/

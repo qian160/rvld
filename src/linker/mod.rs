@@ -1,5 +1,8 @@
 pub mod elf;
 mod magic;
+pub mod file;
+pub mod inputfile;
 
-use elf::*;
+//use elf::*;
 pub use magic::checkMagic;
+pub use elf::EhdrSize;
