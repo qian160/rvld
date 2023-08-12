@@ -1,3 +1,4 @@
+#[derive(Default)]
 pub struct File {
     pub Name:       String,
     pub Contents:   Vec<u8>,

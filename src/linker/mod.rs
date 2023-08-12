@@ -1,8 +1,7 @@
 pub mod elf;
-mod magic;
 pub mod file;
 pub mod inputfile;
+pub mod objectfile;
 
 //use elf::*;
-pub use magic::checkMagic;
-pub use elf::EhdrSize;
+pub use self::elf::{EHDR_SIZE, ElfGetName};
