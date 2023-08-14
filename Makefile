@@ -3,6 +3,7 @@ TESTS := $(wildcard tests/*.sh)
 
 build:
 	@cargo build
+	@ln -sf ./target/debug/rvld ld
 
 test: build
 	@$(MAKE) $(TESTS)
@@ -15,6 +16,6 @@ $(TESTS):
 
 clean:
 	cargo clean
-	rm -rf out/
+	rm -rf ld out/
 
 .PHONY: build clean test $(TESTS)

@@ -1,11 +1,13 @@
 pub const EHDR_SIZE: usize = core::mem::size_of::<Ehdr>();
 pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
 pub const SYM_SIZE: usize = core::mem::size_of::<Sym>();
-const MAGIC: &[u8] = "\x7fELF".as_bytes();
 
+const MAGIC: &[u8] = "\x7fELF".as_bytes();
 pub fn checkMagic(s: &Vec<u8>) -> bool {
     s.starts_with(MAGIC)
 }
+
+use super::inputfile::InputFile;
 
 #[derive(Default, Clone)]
 #[allow(non_snake_case)]
@@ -55,54 +57,56 @@ pub struct Sym {
 	pub Size:       u64,
 }
 
-impl std::fmt::Debug for Ehdr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "
-Ident:		{:x?}
-Type:		{:?}
-Machine:	{:?}
-Version:	{:?}
-Entry:		{:?}
-PhOff:		{:?}
-ShOff:		{:?}
-Flags:		{:?}
-EhSize:		{:?}
-PhEntSize:	{:?}
-PhNum:		{:?}
-ShEntSize:	{:?}
-ShNum:		{:?}
-ShStrndx:	{:?}
-		", self.Ident, self.Type, self.Machine, self.Version, self.Entry, self.PhOff, self.ShOff, self.Flags, self.EhSize, self.PhEntSize, self.PhNum, self.ShEntSize, self.ShNum, self.ShStrndx)
+
+pub enum FileType{
+	FileTypeUnknown,
+	FileTypeObject,
+}
+
+#[derive(Debug)]
+pub enum MachineType {
+	MachineTypeNone,
+	MachineTypeRISCV64,
+}
+
+impl MachineType {
+	pub fn String(&self) -> String {
+		match self {
+			MachineType::MachineTypeRISCV64 =>
+				"riscv64".to_string(),
+			_ =>
+				"unknown".to_string()
+		}
 	}
 }
 
-impl std::fmt::Debug for Shdr {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "
-Name:		{}
-Type:		{}
-Flags:		{}
-Addr:		{}
-Offset:		{}
-Size:		{}
-Link:		{}
-Info:		{}
-AddrAlign:	{}
-EntSize:	{}
-		", self.Name, self.Type, self.Flags, self.Addr, self.Offset, self.Size, self.Link, self.Info, self.AddrAlign, self.EntSize)
+pub fn GetFileType(inputfile: &InputFile) -> FileType {
+	let et = inputfile.Ehdr.Type;
+	match et {
+		elf::abi::ET_REL => 
+			FileType::FileTypeObject,
+		_ =>
+			FileType::FileTypeUnknown
 	}
 }
 
-impl std::fmt::Debug for Sym {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "
-Name:		{:x?}
-Info:		{:?}
-Other:		{:?}
-Shndx:		{:?}
-Val:		{:?}
-Size:		{:?}
-		", self.Name, self.Info, self.Other, self.Shndx, self.Val, self.Size)
+pub fn GetMachineType(inputfile: &InputFile) -> MachineType {
+	let ft = GetFileType(inputfile);
+	let ehdr = &inputfile.Ehdr;
+	match ft {
+		FileType::FileTypeObject => {
+			let mt = inputfile.Ehdr.Machine;
+			if mt == elf::abi::EM_RISCV {
+				let class = ehdr.Ident[4];
+				return match class {
+					elf::abi::ELFCLASS64 => MachineType::MachineTypeRISCV64,
+					_ => MachineType::MachineTypeNone
+				};
+			};
+			MachineType::MachineTypeNone
+		}
+		_ =>
+			MachineType::MachineTypeNone
 	}
 }
 

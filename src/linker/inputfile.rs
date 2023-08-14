@@ -1,5 +1,5 @@
 use crate::debug::print;
-use crate::{error, info};
+use crate::error;
 use crate::linker::file::File;
 use crate::linker::elf::{Shdr, Ehdr, Sym};
 use super::elf::{SHDR_SIZE, SYM_SIZE, EHDR_SIZE, checkMagic};
@@ -10,6 +10,7 @@ use elf::abi::SHN_XINDEX;
 #[derive(Default)]
 pub struct InputFile {
     pub File:           Box<File>,
+    pub Ehdr:           Box<Ehdr>,
     pub ElfSections:    Box<Vec<Shdr>>,
     pub ElfSyms:        Box<Vec<Sym>>,
     pub FirstGlobal:    u64,
@@ -66,7 +67,7 @@ pub fn NewInputFile(file: Box<File>) -> Box<InputFile> {
     }
 
     let ehdr: Ehdr = Read::<Ehdr>(&f.File.Contents).unwrap();
-    info!("EHDR: \n{:?}\n", ehdr);
+    f.Ehdr = Box::new(ehdr.clone());
 
     let mut contents = f.File.Contents[ehdr.ShOff as usize.. ].to_vec();
     let shdr = Read::<Shdr>(&contents).unwrap();
