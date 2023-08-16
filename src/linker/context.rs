@@ -1,4 +1,4 @@
-use super::elf::MachineType;
+use super::{elf::MachineType, file::Objectfile};
 
 pub struct ContextArgs {
     pub Output:         String,
@@ -7,7 +7,8 @@ pub struct ContextArgs {
 }
 
 pub struct Context {
-    pub Args: ContextArgs,
+    pub Args:   ContextArgs,
+    pub Objs:   Vec<Box<Objectfile>>
 }
 
 impl Context {
@@ -16,8 +17,9 @@ impl Context {
             Args: ContextArgs {
                 Output: "a.out".to_string(),
                 Emulation: MachineType::MachineTypeNone,
-                LIbraryPaths: vec![]
-            }
+                LIbraryPaths: vec![],
+            },
+            Objs: vec![],
         })
     }
 }

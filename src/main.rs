@@ -4,52 +4,61 @@ mod utils;
 mod linker;
 mod debug;
 
-use linker::file::newFile;
 use linker::context::Context;
-use linker::elf::{GetMachineType, checkMagic};
-use std::{env, cell::RefCell};
-use debug::print;
+use linker::elf::GetMachineType;
+use linker::file::{File, ReadInputFiles};
+use std::cell::RefCell;
 
 use crate::linker::ElfGetName;
 use crate::linker::elf::MachineType;
 
 fn main() {
-    //env::args().into_iter().for_each(|x| info!("{}", x));
+    //std::env::args().into_iter().for_each(|x| info!("{}", x));
     let mut ctx = Context::new();
     let remaining = parseArgs(&mut ctx);
 
-    for filename in remaining {
-        if filename.starts_with("-") {
+    // -m parameter not specified, try to get it from an input file 
+    if ctx.Args.Emulation == MachineType::MachineTypeNone {
+        for filename in &remaining {
             // options the we dont care about
-            continue;
+            if filename.starts_with("-") {
+                continue;
+            }
+            let file = File::new(&filename, None);
+            ctx.Args.Emulation = GetMachineType(&file);
+            if ctx.Args.Emulation != MachineType::MachineTypeNone {
+                break;
+            }
         }
-        let file = newFile(&filename);
-        assert!(checkMagic(&file.Contents), "{}", color_text!("not an ELF file!", 91));
-
-        let mut objectfile = linker::objectfile::NewObjectFile(file);
-        objectfile.Parse();
-        let inputFile = &objectfile.inputFile;
-        ctx.Args.Emulation = GetMachineType(&inputFile);
-        info!("{}: ", &filename);
-        info!("EHDR:\n{:?}", inputFile.Ehdr);
-        info!("#syms = {}", inputFile.ElfSyms.len());
-        for sym in inputFile.ElfSyms.iter() {
-            info!("\"{}\"", ElfGetName(&inputFile.SymbolStrTab, sym.Name as usize));
-        }
-        debug!("{:?}", ctx.Args.Emulation);
     }
+    if ctx.Args.Emulation != MachineType::MachineTypeRISCV64 {
+        error!("unknown emulation type!");
+    }
+    ReadInputFiles(&mut ctx, remaining);
+
+    for obj in &ctx.Objs {
+        let f = &obj.inputFile;
+        debug!("{}", f.File.Name);
+        info!("#sections = {}", f.ElfSections.len());
+        info!("#syms ={}", f.ElfSyms.len());
+        for sym in f.ElfSyms.iter() {
+            info!("\"{}\"", ElfGetName(&f.SymbolStrTab, sym.Name as usize));
+        }
+    }
+    debug!("#objs = {}", ctx.Objs.len());
 
 }
 
-pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
-    let args: RefCell<Vec<String>> = RefCell::new(env::args().skip(0).collect());
+pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
+    // skip rvld
+    let args: RefCell<Vec<String>> = RefCell::new(std::env::args().skip(1).collect());
     let arg: RefCell<String> = RefCell::new(String::new());
 
     // add a '-' prefix to the string
     let dashes = |name: &str| {
         match name.len() {
-            1 => vec!["-".to_string() + &name.to_string().clone()],
-            _ => vec!["-".to_string() + &name.to_string().clone(), "--".to_string() +&name.to_string().clone()]
+            1 => vec![String::from("-") + &name.to_string().clone()],
+            _ => vec![String::from("-") + &name.to_string().clone(), "--".to_string() +&name.to_string().clone()]
         }
     };
 
@@ -63,7 +72,7 @@ pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
                     error!("option -{}: argument missing", &name);
                 }
                 *arg = args[1].clone();
-                *args = args[2..].to_vec();
+                *args = args[2..].into();
                 return true;
             }
 
@@ -73,7 +82,7 @@ pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
             }
             if args[0].starts_with(&prefix) {
                 *arg = args[0].clone()[prefix.len()..].to_string();
-                *args = args[1..].to_vec();
+                *args = args[1..].into();
                 return true;
             }
         }
@@ -85,7 +94,7 @@ pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
         for opt in dashes(&name) {
             if args[0] == opt {
                 // match and advance by one
-                *args = args[1..].to_vec();
+                *args = args[1..].into();
                 return true;
             }
         }
@@ -96,7 +105,7 @@ pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
     let mut remaining = vec![];
     while args.borrow_mut().len() > 0 {
         if readFlag("help") {
-            info!("usage: {} [options] file...", env::args().next().unwrap());
+            info!("usage: {} [options] file...", std::env::args().next().unwrap());
             std::process::exit(0);
         }
 
@@ -149,7 +158,7 @@ pub fn parseArgs(mut ctx: &mut Box<Context>) -> Vec<String> {
                 error!("unknown command line option: {}", args[0]);
             }
             remaining.push(args[0].clone());
-            *args = args[1..].to_vec();
+            *args = args[1..].into();
         }
     }
     return remaining;
