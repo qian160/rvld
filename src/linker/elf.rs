@@ -15,6 +15,7 @@ use crate::utils::Read;
 use super::file::File;
 use super::context::Context;
 use std::path::Path;
+use std::rc::Rc;
 
 #[derive(Default, Clone)]
 #[allow(non_snake_case)]
@@ -82,7 +83,7 @@ pub struct ArHdr{
 }
 // size: decimal(not binary) encoding using string,
 // e.g:
-// size = [48, 32, 32, 32, 32, 32, 32, 32, 49, 52] => "0       14" => parse -> 0
+// size = [49, 50, 51, 32, 32, 32, 32, 32, 32, 32] => "123       " => parse -> 123
 
 
 #[derive(PartialEq, Default, Clone, Debug)]
@@ -163,6 +164,7 @@ pub fn GetMachineType(file: &File) -> MachineType {
 	}
 }
 
+#[allow(unused)]
 pub fn ElfGetName(strtab: &Vec<u8>, offset: usize) -> String {
     let length = strtab[offset..].iter().position(|&x| x == 0).unwrap();
     std::str::from_utf8(
@@ -188,24 +190,24 @@ pub fn FindLibrary(ctx: &Context, name: &str) -> Option<Box<File>> {
 	None
 }
 
-pub fn ReadArchiveMembers(file: &File) -> Vec<Box<File>>{
+pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Box<File>>{
 	assert!(file.Type == FileType::FileTypeArchive);
 
 	let mut pos = 8;	
 	let mut strTab: Vec<u8> = vec![];
 	let mut files: Vec<Box<File>> = vec![];
-	let Contents = std::fs::read(&file.Name).unwrap();
-	let len = Contents.len();
+	let len = file.Contents.len();
+	let contents = &file.Contents;
 	while len - pos > 1 {
 		if pos % 2 == 1 {
 			pos = pos + 1;
 		}
-		let hdr = Read::<ArHdr>(&Contents[pos..]).unwrap();
+		let hdr = Read::<ArHdr>(&contents[pos..]).unwrap();
 		assert_eq!(hdr.Fmag, [0x60, 0xa]);
 		let dataStart = pos + ARHDR_SIZE;
 		pos = dataStart + hdr.GetSize();
 
-		let contents = &Contents[dataStart..pos];
+		let contents = &contents[dataStart..pos];
 
 		if hdr.IsSymtab() {
 			continue;
@@ -217,7 +219,7 @@ pub fn ReadArchiveMembers(file: &File) -> Vec<Box<File>>{
 		let name = hdr.ReadName(&strTab);
 		//crate::debug!("{}", name);
 		let mut f = File::new(&name, Some(contents.into()));
-		f.Parent = Some(Box::new(file.clone()));
+		f.Parent = Some(file.clone());
 		files.push(f);
 	}
 	files

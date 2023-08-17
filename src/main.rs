@@ -40,13 +40,16 @@ fn main() {
         let f = &obj.inputFile;
         debug!("{}", f.File.Name);
         info!("#sections = {}", f.ElfSections.len());
-        info!("#syms ={}", f.ElfSyms.len());
-        for sym in f.ElfSyms.iter() {
-            info!("\"{}\"", ElfGetName(&f.SymbolStrTab, sym.Name as usize));
+        info!("#syms = {}", f.ElfSyms.len());
+        info!("size = {}", f.File.Contents.len());
+        if let Some(p) = &obj.inputFile.File.Parent {
+            info!("parent = {}", p.Name);
         }
+        //for sym in f.ElfSyms.iter() {
+        //    info!("\"{}\"", ElfGetName(&f.SymbolStrTab, sym.Name as usize));
+        //}
     }
     debug!("#objs = {}", ctx.Objs.len());
-
 }
 
 pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
@@ -57,8 +60,8 @@ pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
     // add a '-' prefix to the string
     let dashes = |name: &str| {
         match name.len() {
-            1 => vec![String::from("-") + &name.to_string().clone()],
-            _ => vec![String::from("-") + &name.to_string().clone(), "--".to_string() +&name.to_string().clone()]
+            1 => vec![String::from("-") + &name.to_string()],
+            _ => vec![String::from("-") + &name.to_string(), "--".to_string() +&name.to_string()]
         }
     };
 

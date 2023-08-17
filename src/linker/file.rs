@@ -1,22 +1,17 @@
+use std::rc::Rc;
 use crate::error;
 use super::context::Context;
 use super::elf::{Shdr, Ehdr, Sym, FileType, ReadArchiveMembers, FindLibrary};
 use super::elf::{SHDR_SIZE, SYM_SIZE, EHDR_SIZE, checkMagic};
 use crate::utils::Read;
 
-use elf::abi::SHN_XINDEX;
-
 #[derive(Default, Clone)]
 pub struct File {
     pub Name:           String,
-    // if we keep every contents whenever a file is opened,
-    // we may run out of memory... here I try to delay the 
-    // read until when it is really needed.
-    // but for objectts in archive file, it's hard to read it
-    // a second time... so some init value may still be needed
-    pub Contents:       Option<Vec<u8>>,
+    pub Contents:       Vec<u8>,
     pub Type:           FileType,
-    pub Parent:         Option<Box<File>>,
+    // objects in archive file share the same parent
+    pub Parent:         Option<Rc<File>>,
 }
 
 #[derive(Default)]
@@ -37,7 +32,6 @@ pub struct Objectfile {
 
 impl File {
     pub fn new(name: &str, contents: Option<Vec<u8>>) -> Box<Self> {
-        let flag = contents.is_some();
         let Contents = if contents.is_none() {
             std::fs::read(name).expect(&format!("{} read failed", name))
         }
@@ -66,37 +60,23 @@ impl File {
         Box::new(
             File{
                 Name: name.to_string(),
-                Contents: if flag {Some(Contents)} else {None},
+                Contents,
                 Parent: None,
                 Type: ft,
             })
-    }
-
-    pub fn GetContents(&self) -> Vec<u8> {
-        if let Some(c) = self.Contents.as_deref() {
-            c.into()
-        }
-        else {
-            std::fs::read(&self.Name).unwrap()
-        }
     }
 }
 
 impl InputFile {
     pub fn new(file: Box<File>) -> Box<Self> {
-//        return Box::new(
-//            InputFile { 
-//                File: file, ..Default::default()
-//            });
         let name = &file.Name;
-        crate::debug!("{}", file.Name);
-        let Contents = file.GetContents();
+        crate::debug!("{}", name);
         
-        if Contents.len() < EHDR_SIZE {
+        if file.Contents.len() < EHDR_SIZE {
             error!("{}: bad size!", name);
         }
 
-        if checkMagic(&Contents) == false {
+        if checkMagic(&file.Contents) == false {
             error!("{}: not an ELF file!", name);
         }
         drop(name);
@@ -105,8 +85,8 @@ impl InputFile {
             ..Default::default()
         };
 
-        let ehdr: Ehdr = Read::<Ehdr>(&Contents).unwrap();
-        let mut contents = &Contents[ehdr.ShOff as usize.. ];
+        let ehdr: Ehdr = Read::<Ehdr>(&f.File.Contents).unwrap();
+        let mut contents = &f.File.Contents[ehdr.ShOff as usize.. ];
         let shdr = Read::<Shdr>(&contents).unwrap();
         let mut num_sections = ehdr.ShNum as u64;
 
@@ -124,7 +104,7 @@ impl InputFile {
         }
 
         let mut shstrndx = ehdr.ShStrndx as usize;
-        if ehdr.ShStrndx == SHN_XINDEX {
+        if ehdr.ShStrndx == elf::abi::SHN_XINDEX {
             shstrndx = link as usize;
         }
         f.Shstrtab = f.GetBytesFromIdx(shstrndx);
@@ -143,7 +123,7 @@ impl InputFile {
 
     fn GetBytesFromShdr(&self, s: &Shdr) -> Vec<u8> {
         let end = (s.Offset + s.Size) as usize;
-        let Contents = self.File.GetContents();
+        let Contents = &self.File.Contents;
         if Contents.len() < end {
             error!("section header is out of range: {}", s.Offset);
         }
@@ -192,21 +172,21 @@ impl Objectfile {
 pub fn ReadInputFiles(ctx: &mut Context, remaining: Vec<String>) {
     for arg in remaining {
         if let Some(arg) = arg.strip_prefix("-l") {
-            ReadFile(ctx, &FindLibrary(ctx, arg).unwrap());
+            ReadFile(ctx, FindLibrary(ctx, arg).unwrap());
         }
         else {
-            ReadFile(ctx, &File::new(&arg, None));
+            ReadFile(ctx, File::new(&arg, None));
         }
     }
 }
 
-pub fn ReadFile(ctx: &mut Context, file: &File) {
+pub fn ReadFile(ctx: &mut Context, file: Box<File>) {
     match file.Type {
         FileType::FileTypeObject => {
-            ctx.Objs.push(Objectfile::new(Box::new(file.clone())))
+            ctx.Objs.push(Objectfile::new(file));
         },
         FileType::FileTypeArchive => {
-            for child in ReadArchiveMembers(file) {
+            for child in ReadArchiveMembers(file.into()) {
                 assert!(child.Type == FileType::FileTypeObject);
                 ctx.Objs.push(Objectfile::new(child));
             }
