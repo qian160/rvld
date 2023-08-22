@@ -9,22 +9,22 @@ use linker::elf::GetMachineType;
 use linker::file::{File, ReadInputFiles};
 use std::cell::RefCell;
 
-use crate::linker::ElfGetName;
 use crate::linker::elf::MachineType;
+use crate::linker::passes::ResolveSymbols;
 
 fn main() {
     //std::env::args().into_iter().for_each(|x| info!("{}", x));
     let mut ctx = Context::new();
     let remaining = parseArgs(&mut ctx);
 
-    // -m parameter not specified, try to get it from an input file 
+    // -m parameter not specified, try to infer it from an input file 
     if ctx.Args.Emulation == MachineType::MachineTypeNone {
         for filename in &remaining {
             // options the we dont care about
             if filename.starts_with("-") {
                 continue;
             }
-            let file = File::new(&filename, None);
+            let file = File::new(&filename, None, None);
             ctx.Args.Emulation = GetMachineType(&file);
             if ctx.Args.Emulation != MachineType::MachineTypeNone {
                 break;
@@ -34,22 +34,30 @@ fn main() {
     if ctx.Args.Emulation != MachineType::MachineTypeRISCV64 {
         error!("unknown emulation type!");
     }
+
     ReadInputFiles(&mut ctx, remaining);
+    // these objects may come directly from input command-line arguments(.o) or extracted from an archive
+    debug!("before: #objs = {}, #syms = {}", ctx.Objs.len(), ctx.SymbolMap.len());
+    ResolveSymbols(&mut ctx);
 
     for obj in &ctx.Objs {
-        let f = &obj.inputFile;
-        debug!("{}", f.File.Name);
-        info!("#sections = {}", f.ElfSections.len());
-        info!("#syms = {}", f.ElfSyms.len());
-        info!("size = {}", f.File.Contents.len());
-        if let Some(p) = &obj.inputFile.File.Parent {
-            info!("parent = {}", p.Name);
+        let o = obj.borrow();
+        let f = o.borrow();
+        if f.Name == "out/tests/hello/a.o" {
+            debug!("{}", f.Name);
+            info!("#sections = {}", f.ElfSections.len());
+            info!("#syms = {}", f.ElfSyms.len());
+            info!("size = {}", f.Contents.len());
+            for sym in f.ElfSyms.iter() {
+                info!("\"{}\"", linker::ElfGetName(&f.SymbolStrTab, sym.Name as usize));
+            }
+            if let Some(p) = &f.Parent {
+                info!("parent = {}", p.Name);
+            }
         }
-        //for sym in f.ElfSyms.iter() {
-        //    info!("\"{}\"", ElfGetName(&f.SymbolStrTab, sym.Name as usize));
-        //}
     }
-    debug!("#objs = {}", ctx.Objs.len());
+    debug!("after: #objs = {}, #syms = {}", ctx.Objs.len(), ctx.SymbolMap.len());
+
 }
 
 pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
@@ -60,8 +68,8 @@ pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
     // add a '-' prefix to the string
     let dashes = |name: &str| {
         match name.len() {
-            1 => vec![String::from("-") + &name.to_string()],
-            _ => vec![String::from("-") + &name.to_string(), "--".to_string() +&name.to_string()]
+            1 => vec![String::from("-") + &name],
+            _ => vec![String::from("-") + &name, String::from("--") +&name]
         }
     };
 
@@ -84,7 +92,7 @@ pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
                 prefix += "=";
             }
             if args[0].starts_with(&prefix) {
-                *arg = args[0].clone()[prefix.len()..].to_string();
+                *arg = args[0].clone()[prefix.len()..].into();
                 *args = args[1..].into();
                 return true;
             }
@@ -117,7 +125,7 @@ pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
         }
         else if readArg("m") {
             let arch = arg.borrow();
-            if *arch == "elf64lriscv".to_string() {
+            if *arch == String::from("elf64lriscv") {
                 ctx.Args.Emulation = MachineType::MachineTypeRISCV64;
             }
             else {
