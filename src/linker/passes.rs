@@ -21,9 +21,7 @@ pub fn ResolveSymbols(ctx: &mut Context) {
             Objectfile::ClearSymbols(file);
         }
     }
-
     ctx.Objs.retain(|obj| {obj.borrow().IsAlive()});
-
 }   
 
 pub fn MarkLiveObjects(ctx: &mut Context) {

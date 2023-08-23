@@ -164,15 +164,19 @@ impl MachineType {
 }
 
 impl Sym {
-	/// check shndx to find if it's a special value.
+	/// some special shndx values
+	
 	/// Symbols with st_shndx=SHN_ABS are absolute and are not affected by relocation.
 	pub fn IsAbs(&self) -> bool {
-		self.Shndx == elf::abi::SHN_ABS
+		self.Shndx == super::abi::SHN_ABS
 	}
-	/// check shndx to find if it's a special value.
 	/// This value marks an undefined, missing, irrelevant, or otherwise meaningless section reference.
 	pub fn IsUndef(&self) -> bool {
-		self.Shndx == elf::abi::SHN_UNDEF
+		self.Shndx == super::abi::SHN_UNDEF
+	}
+	/// Symbols with st_shndx=SHN_COMMON are sometimes used for unallocated C external variables.
+	pub fn IsCommon(&self) -> bool {
+		self.Shndx == super::abi::SHN_COMMON
 	}
 }
 
@@ -182,9 +186,9 @@ pub fn GetMachineType(file: &File) -> MachineType {
 	let machine = Read::<u16>(&Contents[18..]).unwrap();
 	match ft {
 		FileType::FileTypeObject => {
-			if machine == elf::abi::EM_RISCV {
+			if machine == super::abi::EM_RISCV {
 				return match Contents[4]{
-					elf::abi::ELFCLASS64 => MachineType::MachineTypeRISCV64,
+					super::abi::ELFCLASS64 => MachineType::MachineTypeRISCV64,
 					_ => MachineType::MachineTypeNone
 				};
 			};

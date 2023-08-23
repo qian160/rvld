@@ -10,16 +10,16 @@ use super::elf::{Shdr, CheckFileCompatibility, Sym};
 use super::sections::InputSection;
 use super::symbol::Symbol;
 
-use elf::abi::*;
+use super::abi::*;
 
 #[derive(Default,Debug)]
 pub struct Objectfile {
     pub inputFile:      Rc<RefCell<InputFile>>,
     pub SymTabSec:      Option<Box<Shdr>>,
 	pub SymtabShndxSec: Vec<u32>,
-	pub Sections:       Vec<Rc<RefCell<InputSection>>>,
-    // ?
-    pub Commons:        Vec<Rc<RefCell<InputSection>>>,
+	pub Sections:       Vec<Option<Rc<RefCell<InputSection>>>>,
+    // todo: handle shndx = SHN_COMMON?
+    //pub Commons:        Rc<RefCell<InputSection>> ?
 }
 
 impl Deref for Objectfile {
@@ -68,7 +68,6 @@ impl Objectfile {
 
     fn InitSections(obj: Rc<RefCell<Objectfile>>) {
         let len = obj.borrow().inputFile.borrow().ElfSections.len();
-        // crate::debug!("{}: {}", obj.borrow().Name(), len);
         obj.borrow_mut().Sections = vec![Default::default(); len];
         for i in 0..len {
             let shdr = unsafe{
@@ -87,7 +86,7 @@ impl Objectfile {
                     let sec = InputSection::new(obj.clone(), i);
                     // error. we should follow the index, or use a btreemap?
                     //obj.borrow_mut().Sections.push(sec);
-                    obj.borrow_mut().Sections[i] = sec;
+                    obj.borrow_mut().Sections[i] = Some(sec);
                 },
             }
         }
@@ -108,43 +107,42 @@ impl Objectfile {
         }
 
         let mut inputfile = obj.borrow_mut();
-
         let n_locals = inputfile.FirstGlobal as usize;
 
-        inputfile.LocalSymbols = vec![Symbol::new(""); n_locals];
-
+        // first symbol is special, but here we won't deal with it now
+        let firstSym = Symbol::new("");
+        inputfile.LocalSymbols.push(firstSym.clone());
         inputfile.LocalSymbols[0].borrow_mut().File = Some(file.clone());
+        inputfile.Symbols.insert(0, firstSym);
 
-        // first symbol is special, but just skip it now
+        // constract file.symbols from esyms
         for i in 1..n_locals {
             let esym = &inputfile.ElfSyms[i];
-            let mut sym = inputfile.LocalSymbols[i].borrow_mut();
-            sym.Name = ElfGetName(&inputfile.SymbolStrTab, esym.Name as usize);
+            let name = ElfGetName(&inputfile.SymbolStrTab, esym.Name as usize);
+            let s = Symbol::new(&name);
+            let mut sym = s.borrow_mut();
             sym.File = Some(file.clone());
             sym.Value = esym.Val;
             sym.SymIdx = i;
             if esym.IsAbs() == false {
-                let isec = Some(obj.Sections[obj.GetShndx(esym, i)].clone());
+                let isec = obj.Sections[obj.GetShndx(esym, i)].clone();
                 sym.SetInputSection(isec);
             }
-        }
-
-        for i in 0..n_locals {
-            let sym = inputfile.LocalSymbols[i].clone();
-            inputfile.Symbols.push(sym);
+            inputfile.Symbols.insert(i, s.clone());
         }
 
         let globals = n_locals..inputfile.ElfSyms.len();
         for i in globals {
             let esym = &inputfile.ElfSyms[i];
             let name = ElfGetName(&inputfile.SymbolStrTab, esym.Name as usize);
-            inputfile.Symbols.push(Symbol::GetSymbolByName(ctx, &name));
+            inputfile.Symbols.insert(i, Symbol::GetSymbolByName(ctx, &name));
         }
     }
 
+    /// 1. esym.Shndx, (if Shndx is a normal value)
+    /// 2. ShndxSec`[idx]` (Shndx == SHN_XINDEX)
     pub fn GetShndx(&self, esym: &Sym, idx: usize) -> usize {
         //assert!(idx != usize::MAX && idx < self.borrow().ElfSyms.len());
-
         if esym.Shndx == SHN_XINDEX {
             self.SymtabShndxSec[idx as usize] as usize
         }
@@ -158,11 +156,19 @@ impl Objectfile {
         let obj = o.borrow_mut();
         let inputfile = obj.borrow();
         // local symbols dont need to resolve
+        // the ith global symbol
         for i in inputfile.FirstGlobal..inputfile.ElfSyms.len() {
-            let mut sym = inputfile.Symbols[i].borrow_mut();
+            let mut sym = inputfile.Symbols.get(&i).unwrap().borrow_mut();
             let esym = &inputfile.ElfSyms[i];
+
             if esym.IsUndef() {
                 // nothing we can do here, impossible to find out where that symbol comes from
+                continue;
+            }
+
+            // common symbols do not have a particular input section
+            // just skip here(temp solution)
+            if esym.IsCommon() {
                 continue;
             }
 
@@ -178,7 +184,7 @@ impl Objectfile {
             // current esym is not undef, and file unknown. which means 
             // that the symbol is defined by current object file.
             if sym.File.is_none() {
-                debug!("{}: defined by {}", &sym.Name, obj.Name());
+//                debug!("{}: defined by {}", &sym.Name, obj.Name());
                 sym.File = Some(o.clone());
                 sym.SetInputSection(isec);
                 sym.Value = esym.Val;
@@ -194,7 +200,7 @@ impl Objectfile {
         assert!(f.IsAlive);
 
         for i in f.FirstGlobal..f.ElfSyms.len() {
-            let sym = f.Symbols[i].borrow();
+            let sym = f.Symbols.get(&i).unwrap().borrow();
             let esym = &f.ElfSyms[i];
 //            debug!("{}", sym.Name);
             // note: we must arrange command line arguments in correct order.
@@ -215,25 +221,20 @@ impl Objectfile {
     }
 
     fn GetSection(&self, esym: &Sym, idx: usize) ->  Option<Rc<RefCell<InputSection>>> {
-        if idx < self.Sections.len() {
-            if self.GetShndx(esym, idx) == elf::abi::SHN_COMMON as usize{
-                return None;
-            }
-            return Some(self.Sections[self.GetShndx(esym, idx)].clone());
-        }
-        None
+        self.Sections[self.GetShndx(esym, idx)].clone()
     }
 
     pub fn ClearSymbols(o: &Rc<RefCell<Objectfile>>) {
         let obj = o.borrow();
-        let f = obj.borrow();
+        let mut f = obj.borrow_mut();
 
         for i in f.FirstGlobal..f.Symbols.len() {
-            let mut sym = f.Symbols[i].borrow_mut();
-            if let Some(f) = &sym.File {
-                if std::rc::Rc::ptr_eq(&o, &f) {
-//                    warn!("{}: cleared.", sym.Name);
-                    sym.Clear();
+            let sym = f.Symbols.get(&i).unwrap().borrow();
+            if let Some(file) = &sym.File {
+                if std::rc::Rc::ptr_eq(&o, &file) {
+//                    warn!("{}: removed.", sym.Name);
+                    drop(sym);
+                    f.Symbols.remove(&i);
                 }
             }
         }

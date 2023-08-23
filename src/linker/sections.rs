@@ -6,6 +6,8 @@ use super::objectfile::Objectfile;
 use super::elf::Shdr;
 
 // a easier-to-use abstraction for Shdr
+// the input section is a high level view of abstraction.
+// an input section(like .text) consists of some objs and other inforamtions, 
 #[derive(Default,Debug)]
 pub struct InputSection {
 	pub File: 		Rc<RefCell<Objectfile>>,

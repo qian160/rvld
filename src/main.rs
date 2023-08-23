@@ -48,11 +48,14 @@ fn main() {
             info!("#sections = {}", f.ElfSections.len());
             info!("#syms = {}", f.ElfSyms.len());
             info!("size = {}", f.Contents.len());
-            for sym in f.ElfSyms.iter() {
-                info!("\"{}\"", linker::ElfGetName(&f.SymbolStrTab, sym.Name as usize));
-            }
-            if let Some(p) = &f.Parent {
-                info!("parent = {}", p.Name);
+            for sym in &f.Symbols {
+                info!("{}",  sym.1.borrow().Name);
+                if let Some(f) = &sym.1.borrow().File{
+                    if let Some(parent) = &f.borrow().borrow().Parent {
+                        info!("p");
+                        info!("{}", parent.Name);
+                    }
+                }
             }
         }
     }

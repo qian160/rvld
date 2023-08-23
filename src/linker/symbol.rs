@@ -63,11 +63,4 @@ impl Symbol {
         error!("1");
         Default::default()
     }
-
-	pub fn Clear(&mut self) {
-		*self = Symbol{..Default::default()};
-		//self.File = None; 
-		//self.InputSection = None;
-		//self.SymIdx = usize::MAX;
-	}
 }

@@ -10,6 +10,7 @@ use crate::utils::Read;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use std::collections::btree_map::BTreeMap;
 
 use std::ops::Deref;
 
@@ -32,7 +33,8 @@ pub struct InputFile {
     pub Shstrtab:       Vec<u8>,
     pub SymbolStrTab:   Vec<u8>,
     pub IsAlive:        bool,
-    pub Symbols:        Vec<Rc<RefCell<Symbol>>>,
+    /// use `shndx` as the index
+    pub Symbols:        BTreeMap<usize, Rc<RefCell<Symbol>>>,
     pub LocalSymbols:   Vec<Rc<RefCell<Symbol>>>,
 }
 
@@ -58,7 +60,7 @@ impl File {
         }
         else if checkMagic(&Contents) {
             ft = match Read::<u16>(&Contents[16..]).unwrap() {
-                elf::abi::ET_REL => 
+                super::abi::ET_REL => 
                     FileType::FileTypeObject,
                 _ =>
                     FileType::FileTypeUnknown
@@ -119,7 +121,7 @@ impl InputFile {
 
         let mut shstrndx = ehdr.ShStrndx as usize;
         // escape. index stored elsewhere
-        if ehdr.ShStrndx == elf::abi::SHN_XINDEX {
+        if ehdr.ShStrndx == super::abi::SHN_XINDEX {
             shstrndx = link as usize;
         }
         f.Shstrtab = f.GetBytesFromIdx(shstrndx);
