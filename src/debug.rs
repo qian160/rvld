@@ -1,7 +1,7 @@
 use crate::linker::elf::{Sym, Shdr, Ehdr};
 use crate::linker::archive::ArHdr;
 
-/// `31` = red, `32` = green, `33` = yellow
+/// `31` = red, `32` = green, `33` = yellow, 34 = blue
 #[macro_export]
 macro_rules! color_text {
     ($text:expr, $color:expr) => {{

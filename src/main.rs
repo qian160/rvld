@@ -10,7 +10,7 @@ use linker::file::{File, ReadInputFiles};
 use std::cell::RefCell;
 
 use crate::linker::elf::MachineType;
-use crate::linker::passes::ResolveSymbols;
+use crate::linker::passes::{ResolveSymbols, RegisterSectionPieces};
 
 fn main() {
     //std::env::args().into_iter().for_each(|x| info!("{}", x));
@@ -37,29 +37,28 @@ fn main() {
 
     ReadInputFiles(&mut ctx, remaining);
     // these objects may come directly from input command-line arguments(.o) or extracted from an archive
-    debug!("before: #objs = {}, #syms = {}", ctx.Objs.len(), ctx.SymbolMap.len());
+    debug!("before: #objs = {}", ctx.Objs.len());
     ResolveSymbols(&mut ctx);
+    RegisterSectionPieces(&mut ctx);
 
     for obj in &ctx.Objs {
         let o = obj.borrow();
-        let f = o.borrow();
-        if f.Name == "out/tests/hello/a.o" {
-            debug!("{}", f.Name);
-            info!("#sections = {}", f.ElfSections.len());
-            info!("#syms = {}", f.ElfSyms.len());
-            info!("size = {}", f.Contents.len());
-            for sym in &f.Symbols {
+        if o.Name == "out/tests/hello/a.o" {
+            debug!("{}", o.Name);
+            info!("#sections = {}", o.ElfSections.len());
+            info!("#syms = {}", o.ElfSyms.len());
+            info!("size = {}", o.Contents.len());
+            for sym in &o.Symbols {
                 info!("{}",  sym.1.borrow().Name);
                 if let Some(f) = &sym.1.borrow().File{
-                    if let Some(parent) = &f.borrow().borrow().Parent {
-                        info!("p");
-                        info!("{}", parent.Name);
+                    if let Some(parent) = &f.borrow().Parent {
+                        warn!("{}", parent.Name);
                     }
                 }
             }
         }
     }
-    debug!("after: #objs = {}, #syms = {}", ctx.Objs.len(), ctx.SymbolMap.len());
+    debug!("after: #objs = {}", ctx.Objs.len());
 
 }
 

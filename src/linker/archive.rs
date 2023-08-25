@@ -1,5 +1,4 @@
-use std::rc::Rc;
-use crate::utils::{atoi, Read};
+use super::common::*;
 use crate::linker::elf::FileType;
 use super::file::File;
 
@@ -65,7 +64,7 @@ pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Rc<File>>{
 		if pos % 2 == 1 {
 			pos = pos + 1;
 		}
-		let hdr = Read::<ArHdr>(&contents[pos..]).unwrap();
+		let hdr = Read::<ArHdr>(&contents[pos..]);
 		assert_eq!(hdr.Fmag, [0x60, 0xa]);
 		let dataStart = pos + ARHDR_SIZE;
 		pos = dataStart + hdr.GetSize();

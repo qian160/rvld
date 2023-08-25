@@ -1,8 +1,9 @@
 use std::mem::size_of;
-pub fn Read<T: Sized>(data: &[u8]) -> Option<T> {
+use crate::error;
+pub fn Read<T: Sized>(data: &[u8]) -> T {
     let sz = size_of::<T>();
     if data.len() < sz {
-        return None;
+        error!("failed to read");
     }
 
     let mut val = unsafe { std::mem::zeroed::<T>() };
@@ -11,7 +12,18 @@ pub fn Read<T: Sized>(data: &[u8]) -> Option<T> {
         std::ptr::copy::<u8>(data.as_ptr(), val_ptr, sz);
     }
 
-    Some(val)
+    val
+}
+
+pub fn ReadSlice<T: Sized>(data: &[u8]) -> Vec<T> {
+    data.chunks_exact(size_of::<T>())
+        .map(|chunk| {
+            let ptr = chunk.as_ptr() as *const T;
+            unsafe {
+                std::ptr::read(ptr)
+            }
+        } )
+        .collect()
 }
 
 pub fn atoi(s: &[u8]) -> usize {

@@ -1,16 +1,11 @@
+#[allow(unused)]
 use crate::warn;
 
 use super::context::Context;
 use super::objectfile::Objectfile;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
-
-    for (i, file) in ctx.Objs.iter().enumerate() {
-        //let sz = file.borrow().borrow().Contents.len();
-        //for sym in file.borrow().borrow().ElfSyms.iter() {
-        //    crate::debug!("\n{:?}", sym);
-        //}
-        //info!(" #{} - {}, {}", i, file.borrow().Name(), sz);
+    for file in ctx.Objs.iter() {
         Objectfile::ResolveSymbols(file);
     }
 
@@ -41,5 +36,11 @@ pub fn MarkLiveObjects(ctx: &mut Context) {
         }
         Objectfile::MarkLiveObjects(&file, ctx, &mut roots);
         roots = roots[1..].into();
+    }
+}
+
+pub fn RegisterSectionPieces(ctx: &mut Context) {
+    for obj in &ctx.Objs {
+        Objectfile::RegisterSectionPieces(obj.clone());
     }
 }

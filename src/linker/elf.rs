@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 pub const EHDR_SIZE: usize = core::mem::size_of::<Ehdr>();
 pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
-pub const SYM_SIZE: usize = core::mem::size_of::<Sym>();
 
 const MAGIC: &[u8] = b"\x7fELF";
 
@@ -82,17 +81,17 @@ pub struct Shdr{
     /// in-memory address where this section is loaded
 	pub Addr:       u64,
     /// Byte-offset into the file where this section starts
-	pub Offset:     u64,
+	pub Offset:     usize,
     /// Section size in bytes
-	pub Size:       u64,
+	pub Size:       usize,
     /// Defined by section type
 	pub Link:       u32,
     /// Defined by section type
 	pub Info:       u32,
     /// address alignment
-	pub AddrAlign:  u64,
+	pub AddrAlign:  usize,
     /// size of an entry if section data is an array of entries
-	pub EntSize:    u64,
+	pub EntSize:    usize,
 }
 
 #[derive(Default)]
@@ -146,8 +145,9 @@ pub enum FileType{
 	FileTypeArchive,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum MachineType {
+	#[default]
 	MachineTypeNone,
 	MachineTypeRISCV64,
 }
@@ -183,7 +183,7 @@ impl Sym {
 pub fn GetMachineType(file: &File) -> MachineType {
 	let ft = &file.Type;
 	let Contents = &file.Contents;
-	let machine = Read::<u16>(&Contents[18..]).unwrap();
+	let machine = Read::<u16>(&Contents[18..]);
 	match ft {
 		FileType::FileTypeObject => {
 			if machine == super::abi::EM_RISCV {

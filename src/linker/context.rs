@@ -1,22 +1,23 @@
 //! useful informations collected and will be used during linking
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::collections::BTreeMap;
+use super::common::*;
 use super::elf::MachineType;
-use super::objectfile::Objectfile;
+use super::sections::MergedSection;
 use super::symbol::Symbol;
 
+#[derive(Default)]
 pub struct ContextArgs {
     pub Output:         String,
     pub Emulation:      MachineType,
     pub LIbraryPaths:   Vec<String>,
 }
 
+#[derive(Default)]
 pub struct Context {
-    pub Args:       ContextArgs,
-    pub Objs:       Vec<Rc<RefCell<Objectfile>>>,
+    pub Args:           ContextArgs,
+    pub Objs:           Vec<Rc<RefCell<Objectfile>>>,
     /// holds all the `global` symbals here, which can be shared between files
-    pub SymbolMap:  BTreeMap<String, Rc<RefCell<Symbol>>>,
+    pub SymbolMap:      BTreeMap<String, Rc<RefCell<Symbol>>>,
+    pub MergedSections: Vec<Rc<RefCell<MergedSection>>>
 }
 
 impl Context {
@@ -27,8 +28,10 @@ impl Context {
                 Emulation: MachineType::MachineTypeNone,
                 LIbraryPaths: vec![],
             },
-            Objs: vec![],
-            SymbolMap: BTreeMap::new(),
+            ..Default::default()
+            //Objs: vec![],
+            //SymbolMap: BTreeMap::new(),
+            //MergedSections: vec![]
         })
     }
 }

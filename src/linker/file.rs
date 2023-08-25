@@ -1,18 +1,13 @@
 //! module about file and io
-use crate::error;
-use super::context::Context;
-use super::elf::{Shdr, Ehdr, Sym, FileType};
-use super::elf::{SHDR_SIZE, SYM_SIZE, EHDR_SIZE, checkMagic};
-use super::archive::ReadArchiveMembers;
-use super::objectfile::Objectfile;
-use super::symbol::Symbol;
-use crate::utils::Read;
-use std::cell::RefCell;
-use std::path::Path;
-use std::rc::Rc;
-use std::collections::btree_map::BTreeMap;
 
-use std::ops::Deref;
+use super::elf::{Shdr, Ehdr, Sym, FileType};
+use super::elf::{SHDR_SIZE, EHDR_SIZE, checkMagic};
+use super::archive::ReadArchiveMembers;
+use super::symbol::Symbol;
+use crate::utils::{Read, ReadSlice};
+use std::path::Path;
+
+use super::common::*;
 
 #[derive(Default, Clone,Debug)]
 pub struct File {
@@ -33,7 +28,7 @@ pub struct InputFile {
     pub Shstrtab:       Vec<u8>,
     pub SymbolStrTab:   Vec<u8>,
     pub IsAlive:        bool,
-    /// use `shndx` as the index
+    /// use `shndx` as the key
     pub Symbols:        BTreeMap<usize, Rc<RefCell<Symbol>>>,
     pub LocalSymbols:   Vec<Rc<RefCell<Symbol>>>,
 }
@@ -59,7 +54,7 @@ impl File {
             ft = FileType::FileTypeEmpty;
         }
         else if checkMagic(&Contents) {
-            ft = match Read::<u16>(&Contents[16..]).unwrap() {
+            ft = match Read::<u16>(&Contents[16..]) {
                 super::abi::ET_REL => 
                     FileType::FileTypeObject,
                 _ =>
@@ -85,7 +80,7 @@ impl File {
 }
 
 impl InputFile {
-    pub fn new(file: Rc<File>) -> Rc<RefCell<Self>> {
+    pub fn new(file: Rc<File>) -> Box<Self> {
         let name = &file.Name;
         if file.Contents.len() < EHDR_SIZE {
             error!("{}: bad size!", name);
@@ -100,12 +95,12 @@ impl InputFile {
             ..Default::default()
         };
 
-        let ehdr: Ehdr = Read::<Ehdr>(&f.Contents).unwrap();
+        let ehdr: Ehdr = Read::<Ehdr>(&f.Contents);
 
         let mut contents = &f.File.Contents[ehdr.ShOff as usize.. ];
-        let shdr = Read::<Shdr>(&contents).unwrap();
+        let shdr = Read::<Shdr>(&contents);
 
-        let mut num_sections = ehdr.ShNum as u64;
+        let mut num_sections = ehdr.ShNum as usize;
         if num_sections == 0 {
             num_sections = shdr.Size;
         }
@@ -115,7 +110,7 @@ impl InputFile {
 
         while num_sections > 1 {
             contents = &contents[SHDR_SIZE..];
-            f.ElfSections.push(Read::<Shdr>(&contents).unwrap());
+            f.ElfSections.push(Read::<Shdr>(&contents));
             num_sections = num_sections - 1;
         }
 
@@ -126,7 +121,7 @@ impl InputFile {
         }
         f.Shstrtab = f.GetBytesFromIdx(shstrndx);
 
-        Rc::new(RefCell::new(f))
+        Box::new(f)
     }
 
     pub fn FindSection(&self, ty: u32) -> Option<Box<Shdr>> {
@@ -157,17 +152,20 @@ impl InputFile {
     // organized in the data structure called `Sym`
     // it needs to work together with strtab or shstrtab
     pub fn FillUpElfSyms(&mut self, symtab: &Shdr) {
-        let mut bytes = self.GetBytesFromShdr(symtab);
-        let mut n = bytes.len() / SYM_SIZE;
-        while n > 0 {
-            self.ElfSyms.push(Rc::new(Read::<Sym>(&bytes).unwrap()));
-            bytes = bytes[SYM_SIZE..].into();
-            n = n - 1;
-        }
+        let bytes = self.GetBytesFromShdr(symtab);
+        let syms = ReadSlice::<Sym>(&bytes);
+        self.ElfSyms.extend(syms.into_iter().map(Rc::new));
+        
+        //let mut n = bytes.len() / SYM_SIZE;
+        //while n > 0 {
+        //    self.ElfSyms.push(Rc::new(Read::<Sym>(&bytes)));
+        //    bytes = bytes[SYM_SIZE..].into();
+        //    n = n - 1;
+        //}
     }
 }
 
-/// collect all the objects for ctx.objs
+/// collect all the objects into ctx.objs, from input *.o or inside archives
 pub fn ReadInputFiles(ctx: &mut Context, remaining: Vec<String>) {
     for arg in remaining {
         if let Some(arg) = arg.strip_prefix("-l") {
