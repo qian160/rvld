@@ -1,8 +1,9 @@
 //! useful informations collected and will be used during linking
 use super::common::*;
-use super::elf::MachineType;
+use super::elf::{MachineType, Sym};
 use super::sections::MergedSection;
 use super::symbol::Symbol;
+use super::output::{OutputEhdr, Chunker};
 
 #[derive(Default)]
 pub struct ContextArgs {
@@ -17,7 +18,12 @@ pub struct Context {
     pub Objs:           Vec<Rc<RefCell<Objectfile>>>,
     /// holds all the `global` symbals here, which can be shared between files
     pub SymbolMap:      BTreeMap<String, Rc<RefCell<Symbol>>>,
-    pub MergedSections: Vec<Rc<RefCell<MergedSection>>>
+    pub Buf:            Vec<u8>,
+    pub MergedSections: Vec<Rc<RefCell<MergedSection>>>,
+    pub Ehdr:           Box<OutputEhdr>,
+    pub Chunks:         Vec<Box<dyn Chunker>>,
+    pub InternalObj:    Box<Objectfile>,
+    pub InternalEsyms:  Vec<Rc<Sym>>,
 }
 
 impl Context {

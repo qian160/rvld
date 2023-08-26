@@ -1,6 +1,5 @@
 //! a further abstractions for elf sections, making it easier to use
 use super::elf::ElfGetName;
-use super::abi;
 use super::output::Chunk;
 use super::elf::Shdr;
 use super::output::GetOutputName;
@@ -69,7 +68,7 @@ impl InputSection {
 		};
 
 		let shdr = s.Shdr().clone();
-		assert!(shdr.Flags & abi::SHF_COMPRESSED == 0);
+		assert!(shdr.Flags & abi::SHF_COMPRESSED as u64 == 0);
 
 		let start = shdr.Offset;
 		let end = shdr.Offset + shdr.Size;
@@ -138,8 +137,8 @@ impl MergedSection {
 		let name = GetOutputName(name, flags);
 		// ignore these flags
 		let flags = flags &
-			!abi::SHF_GROUP & !abi::SHF_MERGE &
-			!abi::SHF_STRINGS & !abi::SHF_COMPRESSED;
+			!abi::SHF_GROUP as u64 & !abi::SHF_MERGE as u64 &
+			!abi::SHF_STRINGS as u64 & !abi::SHF_COMPRESSED as u64;
 
 		let osec = ctx.MergedSections.iter().find(
 			|osec| {
@@ -200,7 +199,7 @@ pub fn SplitSection(ctx: &mut Context, isec: Rc<RefCell<InputSection>>) -> Box<M
 
 	let mut data = &isec.Contents[..];
 	let mut offset = 0;
-	if shdr.Flags & abi::SHF_STRINGS != 0 {
+	if shdr.Flags & abi::SHF_STRINGS as u64 != 0 {
 		while data.len() > 0 {
 			let end = FindNull(&data, shdr.EntSize);
 

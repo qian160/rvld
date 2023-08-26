@@ -55,7 +55,7 @@ impl File {
         }
         else if checkMagic(&Contents) {
             ft = match Read::<u16>(&Contents[16..]) {
-                super::abi::ET_REL => 
+                abi::ET_REL => 
                     FileType::FileTypeObject,
                 _ =>
                     FileType::FileTypeUnknown
@@ -116,7 +116,7 @@ impl InputFile {
 
         let mut shstrndx = ehdr.ShStrndx as usize;
         // escape. index stored elsewhere
-        if ehdr.ShStrndx == super::abi::SHN_XINDEX {
+        if ehdr.ShStrndx == abi::SHN_XINDEX {
             shstrndx = link as usize;
         }
         f.Shstrtab = f.GetBytesFromIdx(shstrndx);

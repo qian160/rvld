@@ -31,3 +31,10 @@ pub fn atoi(s: &[u8]) -> usize {
 	let end = s.find(" ").unwrap_or(s.len());
 	s[0..end].parse::<usize>().unwrap()
 }
+
+pub fn AlignTo(val: usize, align: usize) -> usize {
+    match align {
+        0 => val,
+        _ => (val + align - 1) &!(align - 1)
+    }
+}

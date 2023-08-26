@@ -22,3 +22,5 @@ EOF
 # The runtime support file libgcc.a can also be searched for using the -B prefix, if needed. If it is not found there, the two standard prefixes above are tried, and that is all. The file is left out of the link if it is not found by those means.
 # Another way to specify a prefix much like the -B prefix is to use the environment variable GCC_EXEC_PREFIX.
 $CC -B. -static "$t"/a.o -o "$t"/out
+file "$t"/out
+file "$t"/out | grep -q "ELF"

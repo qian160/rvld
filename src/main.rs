@@ -8,9 +8,10 @@ use linker::context::Context;
 use linker::elf::GetMachineType;
 use linker::file::{File, ReadInputFiles};
 use std::cell::RefCell;
+use std::io::Write;
 
 use crate::linker::elf::MachineType;
-use crate::linker::passes::{ResolveSymbols, RegisterSectionPieces};
+use crate::linker::passes::{ResolveSymbols, RegisterSectionPieces, CreateInternalFile, CreateSections, GetFileSize};
 
 fn main() {
     //std::env::args().into_iter().for_each(|x| info!("{}", x));
@@ -36,28 +37,47 @@ fn main() {
     }
 
     ReadInputFiles(&mut ctx, remaining);
+    CreateInternalFile(&mut ctx);
     // these objects may come directly from input command-line arguments(.o) or extracted from an archive
     debug!("before: #objs = {}", ctx.Objs.len());
     ResolveSymbols(&mut ctx);
     RegisterSectionPieces(&mut ctx);
+    CreateSections(&mut ctx);
 
-    for obj in &ctx.Objs {
-        let o = obj.borrow();
-        if o.Name == "out/tests/hello/a.o" {
-            debug!("{}", o.Name);
-            info!("#sections = {}", o.ElfSections.len());
-            info!("#syms = {}", o.ElfSyms.len());
-            info!("size = {}", o.Contents.len());
-            for sym in &o.Symbols {
-                info!("{}",  sym.1.borrow().Name);
-                if let Some(f) = &sym.1.borrow().File{
-                    if let Some(parent) = &f.borrow().Parent {
-                        warn!("{}", parent.Name);
-                    }
-                }
-            }
-        }
+    let fileSz = GetFileSize(&ctx);
+
+    let mut f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(ctx.Args.Output).unwrap();
+
+
+    for c in &mut ctx.Chunks {
+        let mut buf = vec![0; fileSz];
+        c.CopyBuf(&mut buf);
+        ctx.Buf = buf;
     }
+
+    f.write_all(&ctx.Buf).unwrap();
+
+//    for obj in &ctx.Objs {
+//        let o = obj.borrow();
+//        if o.Name == "out/tests/hello/a.o" {
+//            debug!("{}", o.Name);
+//            info!("#sections = {}", o.ElfSections.len());
+//            info!("#syms = {}", o.ElfSyms.len());
+//            info!("size = {}", o.Contents.len());
+//            for sym in &o.Symbols {
+//                info!("{}",  sym.1.borrow().Name);
+//                if let Some(f) = &sym.1.borrow().File{
+//                    if let Some(parent) = &f.borrow().Parent {
+//                        warn!("{}", parent.Name);
+//                    }
+//                }
+//            }
+//        }
+//    }
     debug!("after: #objs = {}", ctx.Objs.len());
 
 }

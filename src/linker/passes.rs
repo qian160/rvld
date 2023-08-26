@@ -1,8 +1,10 @@
+use crate::utils::AlignTo;
 #[allow(unused)]
 use crate::warn;
 
-use super::context::Context;
-use super::objectfile::Objectfile;
+use super::common::*;
+use super::output::OutputEhdr;
+use super::symbol::Symbol;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
     for file in ctx.Objs.iter() {
@@ -13,7 +15,8 @@ pub fn ResolveSymbols(ctx: &mut Context) {
 
     for file in &ctx.Objs {
         if file.borrow().IsAlive() == false {
-            Objectfile::ClearSymbols(file);
+            file.borrow_mut().ClearSymbols();
+            
         }
     }
     ctx.Objs.retain(|obj| {obj.borrow().IsAlive()});
@@ -34,13 +37,41 @@ pub fn MarkLiveObjects(ctx: &mut Context) {
         if file.borrow().IsAlive() == false {
             continue;
         }
-        Objectfile::MarkLiveObjects(&file, ctx, &mut roots);
+        file.borrow_mut().MarkLiveObjects(&mut roots);
         roots = roots[1..].into();
     }
 }
 
 pub fn RegisterSectionPieces(ctx: &mut Context) {
     for obj in &ctx.Objs {
-        Objectfile::RegisterSectionPieces(obj.clone());
+        obj.borrow_mut().RegisterSectionPieces();
     }
+}
+
+pub fn CreateInternalFile(ctx: &mut Context) {
+    let mut obj = Objectfile{
+        ..Default::default()
+    };
+
+    //ctx.Objs.push(value)
+    obj.Symbols.insert(0, Symbol::new(""));
+    obj.FirstGlobal = 1;
+    obj.IsAlive = true;
+    obj.ElfSyms = ctx.InternalEsyms.clone();
+    ctx.InternalObj = Box::new(obj);
+}
+
+pub fn CreateSections(ctx: &mut Context) {
+    ctx.Ehdr = OutputEhdr::new();
+    ctx.Chunks.push(ctx.Ehdr.clone());
+}
+
+pub fn GetFileSize(ctx: &Context) -> usize {
+    let mut off = 0;
+    for c in &ctx.Chunks {
+        off = AlignTo(off, c.GetShdr().AddrAlign);
+        off += c.GetShdr().Size;
+    }
+
+    off
 }

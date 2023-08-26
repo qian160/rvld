@@ -1,8 +1,9 @@
 #![allow(non_snake_case)]
 pub const EHDR_SIZE: usize = core::mem::size_of::<Ehdr>();
 pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
+pub const PHDR_SIZE: usize = core::mem::size_of::<Phdr>();
 
-const MAGIC: &[u8] = b"\x7fELF";
+pub const MAGIC: &[u8] = b"\x7fELF";
 
 pub fn checkMagic(s: &Vec<u8>) -> bool {
     s.starts_with(MAGIC)
@@ -12,6 +13,8 @@ use crate::utils::Read;
 
 use super::file::File;
 use super::context::Context;
+
+use elf::abi;
 
 /// The ELF File Header starts off every ELF file and both identifies the
 /// file contents and informs how to interpret said contents. This includes
@@ -94,6 +97,26 @@ pub struct Shdr{
 	pub EntSize:    usize,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct Phdr {
+	/// Program segment type
+    pub Type:		u32,
+    /// Flags for this segment
+    pub Flags:		u32,
+    /// Offset into the ELF file where this segment begins
+    pub Offset:		u64,
+    /// Virtual adress where this segment should be loaded
+    pub VAddr:		u64,
+    /// Physical address where this segment should be loaded
+    pub PAddr:		u64,
+    /// Size of this segment in the file
+    pub FileSize:	u64,
+    /// Size of this segment in memory
+    pub MemSize:	u64,
+    /// file and memory alignment
+    pub Align:		u64,
+}
+
 #[derive(Default)]
 #[repr(C)]
 pub struct Sym {
@@ -168,15 +191,15 @@ impl Sym {
 	
 	/// Symbols with st_shndx=SHN_ABS are absolute and are not affected by relocation.
 	pub fn IsAbs(&self) -> bool {
-		self.Shndx == super::abi::SHN_ABS
+		self.Shndx == abi::SHN_ABS
 	}
 	/// This value marks an undefined, missing, irrelevant, or otherwise meaningless section reference.
 	pub fn IsUndef(&self) -> bool {
-		self.Shndx == super::abi::SHN_UNDEF
+		self.Shndx == abi::SHN_UNDEF
 	}
 	/// Symbols with st_shndx=SHN_COMMON are sometimes used for unallocated C external variables.
 	pub fn IsCommon(&self) -> bool {
-		self.Shndx == super::abi::SHN_COMMON
+		self.Shndx == abi::SHN_COMMON
 	}
 }
 
@@ -186,9 +209,9 @@ pub fn GetMachineType(file: &File) -> MachineType {
 	let machine = Read::<u16>(&Contents[18..]);
 	match ft {
 		FileType::FileTypeObject => {
-			if machine == super::abi::EM_RISCV {
+			if machine == abi::EM_RISCV {
 				return match Contents[4]{
-					super::abi::ELFCLASS64 => MachineType::MachineTypeRISCV64,
+					abi::ELFCLASS64 => MachineType::MachineTypeRISCV64,
 					_ => MachineType::MachineTypeNone
 				};
 			};

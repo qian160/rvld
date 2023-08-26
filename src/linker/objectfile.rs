@@ -1,6 +1,6 @@
 use super::common::*;
 use super::elf::ElfGetName;
-use super::abi::*;
+use elf::abi::*;
 use super::file::{InputFile, File};
 use super::elf::{Shdr, CheckFileCompatibility, Sym};
 use super::sections::{InputSection, MergeableSection, MergedSection, SplitSection};
@@ -100,7 +100,7 @@ impl Objectfile {
             let isec = obj.borrow().Sections[i].clone();
             if let Some(isec) = isec {
                 let mut isecbm = isec.borrow_mut();
-                if isecbm.IsAlive && isecbm.Shdr().Flags & SHF_MERGE != 0 {
+                if isecbm.IsAlive && isecbm.Shdr().Flags & SHF_MERGE as u64 != 0 {
                     isecbm.IsAlive = false;
                     drop(isecbm);
                     let ms = SplitSection(ctx, isec.clone());
@@ -206,14 +206,12 @@ impl Objectfile {
         }
     }
 
-    pub fn MarkLiveObjects(obj: &Rc<RefCell<Objectfile>>, ctx: &mut Context, roots: &mut Vec<Rc<RefCell<Objectfile>>>) {
-        let obj = obj.borrow();
+    pub fn MarkLiveObjects(&mut self, roots: &mut Vec<Rc<RefCell<Objectfile>>>) {
+        assert!(self.IsAlive);
 
-        assert!(obj.IsAlive);
-
-        for i in obj.FirstGlobal..obj.ElfSyms.len() {
-            let sym = obj.Symbols.get(&i).unwrap().borrow();
-            let esym = &obj.ElfSyms[i];
+        for i in self.FirstGlobal..self.ElfSyms.len() {
+            let sym = self.Symbols.get(&i).unwrap().borrow();
+            let esym = &self.ElfSyms[i];
             // note: we must arrange command line arguments in correct order.
             // objects that offer symbols must be put before whom use symbols
             if sym.File.is_none() {
@@ -235,25 +233,22 @@ impl Objectfile {
         self.Sections[self.GetShndx(esym, idx)].clone()
     }
 
-    pub fn ClearSymbols(o: &Rc<RefCell<Objectfile>>) {
-        let mut f = o.borrow_mut();
-
-        for i in f.FirstGlobal..f.Symbols.len() {
-            let sym = f.Symbols.get(&i).unwrap().borrow();
+    pub fn ClearSymbols(&mut self) {
+        for i in self.FirstGlobal..self.Symbols.len() {
+            let sym = self.Symbols.get(&i).unwrap().borrow();
             if let Some(file) = &sym.File {
-                if std::rc::Rc::ptr_eq(&o, &file) {
+                if std::ptr::eq(self as *const _, file.as_ptr()) {
 //                    warn!("{}: removed.", sym.Name);
                     drop(sym);
-                    f.Symbols.remove(&i);
+                    self.Symbols.remove(&i);
                 }
             }
         }
     }
 
     // diff
-    pub fn RegisterSectionPieces(obj: Rc<RefCell<Self>>) {
-        let mut o = obj.borrow_mut();
-        for m in &mut o.MergeableSections {
+    pub fn RegisterSectionPieces(&mut self) {
+        for m in &mut self.MergeableSections {
             if let Some(ms) = m {
                 let len = ms.Strs.len();
                 ms.Fragments = Vec::with_capacity(len);
@@ -265,16 +260,16 @@ impl Objectfile {
             }
         }
 
-        let len = o.ElfSyms.len();
+        let len = self.ElfSyms.len();
         for i in 1..len {
-            let sym = o.Symbols.get(&i).unwrap();
-            let esym = &o.ElfSyms[i];
+            let sym = self.Symbols.get(&i).unwrap();
+            let esym = &self.ElfSyms[i];
 
             if esym.IsAbs() || esym.IsUndef() || esym.IsCommon() {
                 continue;
             }
 
-            match &o.MergeableSections[o.GetShndx(esym, i)] {
+            match &self.MergeableSections[self.GetShndx(esym, i)] {
                 Some(m) => {
                     let (frag, offset) = m.GetFragment(esym.Val as u32);
                     if frag.is_none() {
