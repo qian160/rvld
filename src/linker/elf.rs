@@ -5,7 +5,7 @@ pub const PHDR_SIZE: usize = core::mem::size_of::<Phdr>();
 
 pub const MAGIC: &[u8] = b"\x7fELF";
 
-pub fn checkMagic(s: &Vec<u8>) -> bool {
+pub fn checkMagic(s: &[u8]) -> bool {
     s.starts_with(MAGIC)
 }
 
@@ -223,7 +223,7 @@ pub fn GetMachineType(file: &File) -> MachineType {
 }
 
 #[allow(unused)]
-pub fn ElfGetName(strtab: &Vec<u8>, offset: usize) -> String {
+pub fn ElfGetName(strtab: &[u8], offset: usize) -> String {
     let length = strtab[offset..].iter().position(|&x| x == 0).unwrap();
     std::str::from_utf8(
 		&strtab[offset..offset+length]).unwrap().into()

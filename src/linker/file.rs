@@ -97,29 +97,25 @@ impl InputFile {
 
         let ehdr: Ehdr = Read::<Ehdr>(&f.Contents);
 
-        let mut contents = &f.File.Contents[ehdr.ShOff as usize.. ];
+        let contents = &f.File.Contents[ehdr.ShOff as usize.. ];
         let shdr = Read::<Shdr>(&contents);
 
-        let mut num_sections = ehdr.ShNum as usize;
-        if num_sections == 0 {
-            num_sections = shdr.Size;
-        }
-
         let link = shdr.Link;
-        f.ElfSections = vec![shdr].into();
+        f.ElfSections = vec![shdr];
 
-        while num_sections > 1 {
-            contents = &contents[SHDR_SIZE..];
-            f.ElfSections.push(Read::<Shdr>(&contents));
-            num_sections = num_sections - 1;
-        }
+        // read shdr
+        contents.chunks_exact(SHDR_SIZE).skip(1).for_each(
+            |shdr| {
+                f.ElfSections.push(Read::<Shdr>(shdr));
+            }
+        );
 
         let mut shstrndx = ehdr.ShStrndx as usize;
         // escape. index stored elsewhere
         if ehdr.ShStrndx == abi::SHN_XINDEX {
             shstrndx = link as usize;
         }
-        f.Shstrtab = f.GetBytesFromIdx(shstrndx);
+        f.Shstrtab = f.GetBytesFromIdx(shstrndx).into();
 
         Box::new(f)
     }
@@ -135,16 +131,16 @@ impl InputFile {
         None
     }
 
-    pub fn GetBytesFromShdr(&self, s: &Shdr) -> Vec<u8> {
+    pub fn GetBytesFromShdr(&self, s: &Shdr) -> &[u8] {
         let end = (s.Offset + s.Size) as usize;
         let Contents = &self.File.Contents;
         if Contents.len() < end {
             error!("section header is out of range: {}", s.Offset);
         }
-        Contents[s.Offset as usize..end].into()
+        &Contents[s.Offset as usize..end]
     }
 
-    pub fn GetBytesFromIdx(&self, idx: usize) -> Vec<u8> {
+    pub fn GetBytesFromIdx(&self, idx: usize) -> &[u8] {
         self.GetBytesFromShdr(&self.ElfSections[idx])
     }
 

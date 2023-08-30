@@ -34,17 +34,17 @@ impl DerefMut for Objectfile {
 impl Objectfile {
     pub fn new(ctx: &mut Context, file: Rc<File>, Alive: bool) -> Rc<RefCell<Self>> {
         CheckFileCompatibility(ctx, file.as_ref());
-        let obj = Rc::new(RefCell::new(Objectfile {
+        let obj = Objectfile {
             inputFile: InputFile::new(file), 
             ..Default::default()
-        }));
+        }.ToRcRefcell();
         obj.borrow_mut().IsAlive = Alive;
         Objectfile::Parse(obj.clone(), ctx);
         return obj;
     }
 
     pub fn Name(&self) -> &String {
-        &self.inputFile.Name//.clone()
+        &self.Name
     }
 
     pub fn Parse(obj: Rc<RefCell<Objectfile>>, ctx: &mut Context) {
@@ -55,16 +55,16 @@ impl Objectfile {
         if let Some(symtab) = o.SymTabSec.clone() {
             o.FirstGlobal = symtab.Info as usize;
             o.FillUpElfSyms(&symtab);
-            o.SymbolStrTab = o.GetBytesFromIdx(symtab.Link as usize);
+            o.SymbolStrTab = o.GetBytesFromIdx(symtab.Link as usize).into();
         }
 
         drop(o);
-        Objectfile::InitSections(obj.clone());
+        Objectfile::InitSections(obj.clone(), ctx);
         Objectfile::InitSymbols(obj.clone(), ctx);
         Objectfile::InitMergeableSections(obj, ctx);
     }
 
-    fn InitSections(obj: Rc<RefCell<Self>>) {
+    fn InitSections(obj: Rc<RefCell<Self>>, ctx: &mut Context) {
         let len = obj.borrow().ElfSections.len();
         obj.borrow_mut().Sections = vec![Default::default(); len];
         for i in 0..len {
@@ -81,7 +81,8 @@ impl Objectfile {
                     obj.borrow_mut().FillUpSymtabShndxSec(shdr);
                 },
                 _ => {
-                    let sec = InputSection::new(obj.clone(), i);
+                    let name = ElfGetName(&obj.borrow().Shstrtab, shdr.Name as usize);
+                    let sec = InputSection::new(ctx, name, obj.clone(), i);
                     // error. we should follow the index, or use a btreemap?
                     //obj.borrow_mut().Sections.push(sec);
                     obj.borrow_mut().Sections[i] = Some(sec);
@@ -246,7 +247,6 @@ impl Objectfile {
         }
     }
 
-    // diff
     pub fn RegisterSectionPieces(&mut self) {
         for m in &mut self.MergeableSections {
             if let Some(ms) = m {

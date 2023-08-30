@@ -3,6 +3,8 @@ CC=riscv64-linux-gnu-gcc
 test_name=$(basename "$0" .sh)
 t=out/tests/$test_name
 
+set -e
+
 mkdir -p "$t"
 
 cat <<EOF | $CC -o "$t"/a.o -c -xc -
@@ -23,4 +25,5 @@ EOF
 # Another way to specify a prefix much like the -B prefix is to use the environment variable GCC_EXEC_PREFIX.
 $CC -B. -static "$t"/a.o -o "$t"/out
 file "$t"/out
+stat "$t"/out
 file "$t"/out | grep -q "ELF"

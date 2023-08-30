@@ -5,7 +5,7 @@ pub mod archive;
 pub mod passes;
 pub mod objectfile;
 
-mod output;
+pub mod output;
 mod sections;
 mod symbol;
 mod common;

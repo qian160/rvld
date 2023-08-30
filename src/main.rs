@@ -1,17 +1,18 @@
 #![allow(non_snake_case)]
-//#![deny(unused)]
+#![deny(unused)]
+#![allow(unreachable_code)]
 mod utils;
 mod linker;
 mod debug;
 
 use linker::context::Context;
 use linker::elf::GetMachineType;
-use linker::file::{File, ReadInputFiles};
+use linker::file::File;
 use std::cell::RefCell;
 use std::io::Write;
 
-use crate::linker::elf::MachineType;
-use crate::linker::passes::{ResolveSymbols, RegisterSectionPieces, CreateInternalFile, CreateSections, GetFileSize};
+use crate::linker::elf::{MachineType, checkMagic};
+use crate::linker::passes;
 
 fn main() {
     //std::env::args().into_iter().for_each(|x| info!("{}", x));
@@ -36,49 +37,66 @@ fn main() {
         error!("unknown emulation type!");
     }
 
-    ReadInputFiles(&mut ctx, remaining);
-    CreateInternalFile(&mut ctx);
-    // these objects may come directly from input command-line arguments(.o) or extracted from an archive
-    debug!("before: #objs = {}", ctx.Objs.len());
-    ResolveSymbols(&mut ctx);
-    RegisterSectionPieces(&mut ctx);
-    CreateSections(&mut ctx);
+    linker::file::ReadInputFiles(&mut ctx, remaining);
+    passes::CreateInternalFile(&mut ctx);   debug!("before: #objs = {}", ctx.Objs.len());
+    passes::ResolveSymbols(&mut ctx);       debug!("after: #objs = {}", ctx.Objs.len());
+    passes::RegisterSectionPieces(&mut ctx);
+    passes::CreateSyntheticSections(&mut ctx);
+    passes::BinSections(&mut ctx);
 
-    let fileSz = GetFileSize(&ctx);
+    // it seems that these chunks have some problems...
+    let chunks = passes::CollectOutputSections(&mut ctx);
+
+    ctx.Chunks.extend(chunks);
+
+    warn!("#chunks = {}", ctx.Chunks.len());
+
+    passes::ComputeSectionSizes(&mut ctx);
+
+    let ctx_ptr = std::ptr::addr_of_mut!(ctx);
+    // mark
+    for i in 0..ctx.Chunks.len() {
+        let c = unsafe {&mut *ctx.Chunks[i]};
+        c.UpdateShdr(ctx_ptr);
+    }
+
+    let fileSz = passes::GetFileSize(&mut ctx);
+    debug!("file size = {fileSz}");
 
     let mut f = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
-        .open(ctx.Args.Output).unwrap();
+        .open(&ctx.Args.Output).unwrap();
 
+    ctx.Buf = vec![0; fileSz];
 
-    for c in &mut ctx.Chunks {
-        let mut buf = vec![0; fileSz];
-        c.CopyBuf(&mut buf);
-        ctx.Buf = buf;
+    for i in 0..ctx.Chunks.len() {
+        let c = unsafe { &mut *ctx.Chunks[i]};
+        c.CopyBuf(ctx_ptr);
     }
 
     f.write_all(&ctx.Buf).unwrap();
 
-//    for obj in &ctx.Objs {
-//        let o = obj.borrow();
-//        if o.Name == "out/tests/hello/a.o" {
-//            debug!("{}", o.Name);
-//            info!("#sections = {}", o.ElfSections.len());
-//            info!("#syms = {}", o.ElfSyms.len());
-//            info!("size = {}", o.Contents.len());
-//            for sym in &o.Symbols {
-//                info!("{}",  sym.1.borrow().Name);
-//                if let Some(f) = &sym.1.borrow().File{
-//                    if let Some(parent) = &f.borrow().Parent {
-//                        warn!("{}", parent.Name);
-//                    }
-//                }
-//            }
-//        }
-//    }
-    debug!("after: #objs = {}", ctx.Objs.len());
+    assert!(checkMagic(&ctx.Buf));
+
+    for obj in &ctx.Objs {
+        let o = obj.borrow();
+        if o.Name == "out/tests/hello/a.o" {
+            debug!("{}", o.Name);
+            info!("#sections = {}", o.ElfSections.len());
+            info!("#syms = {}", o.ElfSyms.len());
+            info!("size = {}", o.Contents.len());
+            for sym in &o.Symbols {
+                info!("{}",  sym.1.borrow().Name);
+                if let Some(f) = &sym.1.borrow().File{
+                    if let Some(parent) = &f.borrow().Parent {
+                        warn!("{}", parent.Name);
+                    }
+                }
+            }
+        }
+    }
 
 }
 
@@ -177,13 +195,14 @@ pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {
                 .args(&["rev-list", "-1", "HEAD"]).output();
             match git_output {
                 Ok(out) => {
-                    let version = String::from_utf8_lossy(&out.stdout).to_string();
-                    info!("rvld 0.1.0-{}", version);
+                    let version = String::from_utf8_lossy(&out.stdout)[0..6].to_string();
+                    println!("rvld 0.1.0-{}", version);
                 }
                 Err(e) => {
                     eprintln!("{}", e);
                 }
             }
+            std::process::exit(0);
         }
         else {
             let mut args = args.borrow_mut();

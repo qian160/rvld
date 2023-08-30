@@ -1,6 +1,8 @@
 //! a further abstractions for elf sections, making it easier to use
+use crate::linker::output::GetOutputSection;
+
 use super::elf::ElfGetName;
-use super::output::Chunk;
+use super::output::{Chunk, OutputSection};
 use super::elf::Shdr;
 use super::output::GetOutputName;
 
@@ -15,9 +17,14 @@ pub struct InputSection {
 	pub File: 		Rc<RefCell<Objectfile>>,
 	pub	Contents:	Vec<u8>,
 	pub Shndx:		usize,
+	/// the `Size` field from shdr
 	pub ShSize:  	usize,
 	pub IsAlive:  	bool,
 	pub P2Align:  	u8,
+	/// used by output section
+	pub Offset:		usize,
+	/// multiple inputsecs could be mapped to the same outputsec
+	pub OutputSection:	Rc<RefCell<OutputSection>>,
 }
 
 #[derive(Default,Debug)]
@@ -45,21 +52,19 @@ pub struct SectionFragment {
 
 impl Deref for MergedSection {
 	type Target = Chunk;
-
 	fn deref(&self) -> &Self::Target {
 		&self.Chunk
 	}
 }
 
 impl DerefMut for MergedSection {
-
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.Chunk
 	}
 }
 
 impl InputSection {
-	pub fn new(file: Rc<RefCell<Objectfile>>, shndx: usize) -> Rc<RefCell<Self>>{
+	pub fn new(ctx: &mut Context, name: String, file: Rc<RefCell<Objectfile>>, shndx: usize) -> Rc<RefCell<Self>>{
 		let mut s = InputSection {
 			File: file,
 			Shndx: shndx,
@@ -75,13 +80,13 @@ impl InputSection {
 		s.Contents = s.File.borrow().Contents[start..end].into();
 
 		s.ShSize = shdr.Size;
-		let align = shdr.AddrAlign;
-		s.P2Align = match align {
+		s.P2Align = match shdr.AddrAlign {
 			0 => 0,
-			_ => align.trailing_zeros() as u8
+			_ => shdr.AddrAlign.trailing_zeros() as u8
 		};
 
-		Rc::new(RefCell::new(s))
+		s.OutputSection = GetOutputSection(ctx, name, shdr.Type, shdr.Flags);
+		s.ToRcRefcell()
 	}
 
 	/// this function is not so friendly...we must not own any
@@ -96,6 +101,17 @@ impl InputSection {
 
 	pub fn Name(&self) -> String {
 		ElfGetName(&self.File.borrow().Shstrtab, self.Shdr().Name as usize)
+	}
+
+	pub fn WriteTo(&mut self, buf: &mut [u8]) {
+		if self.Shdr().Type != abi::SHT_NOBITS && self.ShSize != 0 {
+			self.CopyContents(buf);
+		}
+	}
+
+	// mark
+	fn CopyContents(&mut self, buf: &mut [u8]) {
+		buf[..self.Contents.len()].copy_from_slice(&self.Contents[..]);
 	}
 }
 
@@ -130,7 +146,7 @@ impl MergedSection {
 		m.Shdr.Flags = flags;
 		m.Shdr.Type = ty;
 
-		Rc::new(RefCell::new(m))
+		m.ToRcRefcell()
 	}
 
 	pub fn GetInstance(ctx: &mut Context, name: &str, ty: u32, flags: u64) -> Rc<RefCell<Self>> {

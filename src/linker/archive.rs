@@ -87,6 +87,6 @@ pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Rc<File>>{
 		files.push(f);
 	}
 	
-	crate::warn!("#{} objs collected from {}",files.len(), file.Name);
+//	crate::warn!("#{} objs collected from {}",files.len(), file.Name);
 	files
 }
