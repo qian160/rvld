@@ -1,3 +1,4 @@
+use elf::abi::EF_RISCV_RVC;
 use crate::utils;
 
 use super::elf::{Shdr, EHDR_SIZE, Ehdr, MAGIC, PHDR_SIZE, SHDR_SIZE};
@@ -134,11 +135,16 @@ impl Chunker for OutputEhdr {
 		ehdr.Type = abi::ET_EXEC;
 		ehdr.Machine = abi::EM_RISCV;
 		ehdr.Version = abi::EV_CURRENT as u32;
-
+		ehdr.Entry = GetEntryAddr(ctx);
+		ehdr.ShOff = ptr2ref(ctx).Shdr.Shdr.Offset as u64;
+		ehdr.Flags = GetFlags(ctx);
 		ehdr.EhSize = EHDR_SIZE as u16;
 		ehdr.PhEntSize = PHDR_SIZE as u16;
 
 		ehdr.ShEntSize = SHDR_SIZE as u16;
+		ehdr.ShNum = (ptr2ref(ctx).Shdr.Shdr.Size / SHDR_SIZE) as u16;
+
+		debug!("\n{:?}", ehdr);
 
 		let ehdr_ptr = std::ptr::addr_of!(ehdr) as *const u8;
 		let ctx = ptr2ref(ctx);
@@ -162,14 +168,15 @@ impl Chunker for OutputShdr {
 	fn CopyBuf(&mut self, ctx: *mut Box<Context>) {
 		let ctx = ptr2ref(ctx);
 		let base = &mut ctx.Buf[self.Shdr.Offset..];
-		utils::Write::<Shdr>(base, Shdr{..Default::default()});
+		utils::Write::<Shdr>(base, &Shdr{..Default::default()});
 		// write output file's shdr
 		for c in &mut ctx.Chunks {
-			let c = unsafe {&mut **c};
+			let c = ptr2ref_dyn(*c);
 			if c.GetShndx() > 0 {
+				error!("1");
 				utils::Write::<Shdr>(
 					&mut base[c.GetShndx() * SHDR_SIZE..],
-					c.GetShdr().clone()
+						c.GetShdr()
 				);
 			}
 		}
@@ -180,12 +187,9 @@ impl Chunker for OutputShdr {
 		let ctx = ptr2ref(ctx);
 		// all 0s at present
 		let n = ctx.Chunks.iter()
-			.map(|chunk| unsafe {&mut **chunk}.GetShndx()
-			)
+			.map(|chunk| unsafe {&mut **chunk}.GetShndx())
 			.max()
 			.unwrap_or(0);
-
-		warn!("{n}");
 
 		self.Shdr.Size = (n + 1) * SHDR_SIZE;
 	}
@@ -280,7 +284,43 @@ pub fn GetOutputSection(ctx: &mut Context, name: String, ty: u32, flags: u64) ->
 	}
 }
 
+pub fn GetEntryAddr(ctx: *mut Box<Context>) -> u64 {
+	let ctx = ptr2ref(ctx);
+	for osec in &ctx.OutputSections {
+		if osec.borrow().Name == ".text" {
+			return osec.borrow().Shdr.Addr;
+		}
+	}
+	0
+}
+
+pub fn GetFlags(ctx: *mut Box<Context>) -> u32 {
+	let ctx = ptr2ref(ctx);
+	assert!(ctx.Objs.len() > 0);
+	let mut flags = ctx.Objs[0].borrow().GetEhdr().Flags;
+	for obj in &ctx.Objs {
+		if Rc::ptr_eq(obj, &ctx.InternalObj) {
+			continue;
+		}
+
+		if obj.borrow().GetEhdr().Flags & EF_RISCV_RVC != 0 {
+			flags |= EF_RISCV_RVC;
+			break;
+		}
+	}
+
+	flags
+}
+
 /// an ugly function to deal with rust's borrow rules...
-pub fn ptr2ref(ctx_ptr: *mut Box<Context>) -> &'static mut Box<Context> {
-	unsafe{&mut *ctx_ptr}
+//pub fn ptr2ref(ctx_ptr: *mut Box<Context>) -> &'static mut Box<Context> {
+//	unsafe{&mut *ctx_ptr}
+//}
+
+pub fn ptr2ref<T>(ptr: *mut T) -> &'static mut T {
+	unsafe {&mut *ptr}
+}
+
+pub fn ptr2ref_dyn(ptr: *mut dyn Chunker) -> &'static mut dyn Chunker {
+	unsafe {&mut *ptr}
 }

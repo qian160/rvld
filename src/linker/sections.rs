@@ -15,7 +15,8 @@ use super::common::*;
 #[derive(Default,Debug)]
 pub struct InputSection {
 	pub File: 		Rc<RefCell<Objectfile>>,
-	pub	Contents:	Vec<u8>,
+	pub	Contents:	Box<[u8]>,
+	//pub	Contents:	Vec<u8>,
 	pub Shndx:		usize,
 	/// the `Size` field from shdr
 	pub ShSize:  	usize,
@@ -77,14 +78,16 @@ impl InputSection {
 
 		let start = shdr.Offset;
 		let end = shdr.Offset + shdr.Size;
-		s.Contents = s.File.borrow().Contents[start..end].into();
+
+		s.Contents = Box::from(&s.File.borrow().Contents[start..end]);
+		//s.Contents = s.File.borrow().Contents[start..end].into();
+
 
 		s.ShSize = shdr.Size;
 		s.P2Align = match shdr.AddrAlign {
 			0 => 0,
 			_ => shdr.AddrAlign.trailing_zeros() as u8
 		};
-
 		s.OutputSection = GetOutputSection(ctx, name, shdr.Type, shdr.Flags);
 		s.ToRcRefcell()
 	}

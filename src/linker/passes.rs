@@ -1,5 +1,6 @@
 use super::common::*;
-use super::output::{OutputEhdr, OutputShdr, Chunker};
+use super::elf::IMAGE_BASE;
+use super::output::{OutputEhdr, OutputShdr, Chunker, ptr2ref_dyn};
 use super::symbol::Symbol;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
@@ -64,38 +65,61 @@ pub fn CreateInternalFile(ctx: &mut Context) {
 pub fn CreateSyntheticSections(ctx: &mut Context) {
     ctx.Ehdr = OutputEhdr::new();
     ctx.Shdr = OutputShdr::new();
+
     // ehdr must be the first chunk to be written
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Ehdr));
-    //// the first section header is always empty.(according to the abi)
+    // the first section header is always empty.(according to the abi)
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Shdr));
 }
 
-pub fn GetFileSize(ctx: &mut Context) -> usize {
-    let mut off = 0;
-    for c in &mut ctx.Chunks {
-        let c = unsafe { &mut **c};
-        off = AlignTo(off, c.GetShdr().AddrAlign);
-        c.GetShdr().Offset = off;
-        off += c.GetShdr().Size;
+pub fn SetOutputSectionOffsets(ctx: &mut Context) -> usize {
+    let mut addr = IMAGE_BASE;
+    // set up addr
+    for c in &ctx.Chunks {
+        let c = ptr2ref_dyn(*c);
+        if c.GetShdr().Flags & abi::SHF_ALLOC as u64 == 0 {
+            continue;
+        }
+
+        addr = AlignTo(addr, c.GetShdr().AddrAlign);
+        c.GetShdr().Addr = addr as u64;
+
+        if !isTbss(c) {
+            addr += c.GetShdr().Size;
+        }
     }
-    off
+
+    let mut i = 0;
+    let first = ptr2ref_dyn(ctx.Chunks[0]);
+    // set up offset
+    loop {
+        let shdr = ptr2ref_dyn(ctx.Chunks[i]).GetShdr();
+        shdr.Offset = (shdr.Addr - first.GetShdr().Addr) as usize;
+        i += 1;
+
+        if i >= ctx.Chunks.len() || 
+            ptr2ref_dyn(ctx.Chunks[i]).GetShdr().Flags & abi::SHF_ALLOC as u64 == 0 {
+            break;
+        }
+    }
+
+    let lastShdr = ptr2ref_dyn(ctx.Chunks[i-1]).GetShdr();
+    let mut fileoff = lastShdr.Offset + lastShdr.Size;
+
+    // non-alloc sections 
+    while i < ctx.Chunks.len() {
+        let shdr = ptr2ref_dyn(ctx.Chunks[i]).GetShdr();
+        fileoff = AlignTo(fileoff, shdr.AddrAlign);
+        shdr.Offset = fileoff;
+        fileoff += shdr.Size;
+        i += 1;
+    }
+    fileoff
 }
 
 // mark. there's probably a bug here
 /// fill up the `Members` field for ctx.outputsections
 pub fn BinSections(ctx: &mut Context) {
-    let len = ctx.OutputSections.len();
-    // this will make all the Rc point to a same addressbugs
-    //
-    //ctx.OutputSections = vec![Default::default(); len];
-    // this works fine but not so elegant
-    //for i in 0..len{
-    //    ctx.OutputSections.push(Default::default());
-    //}
-    ctx.OutputSections = (0..len)
-        .map(|_| Default::default())
-        .collect();
-
     for file in &ctx.Objs {
         for isec in &file.borrow().Sections {
             match isec {
@@ -127,7 +151,6 @@ pub fn CollectOutputSections(ctx: &mut Context) -> Vec<*mut dyn Chunker>{
 }
 
 pub fn ComputeSectionSizes(ctx: &mut Context) {
-
     for osec in &ctx.OutputSections {
         let mut offset = 0;
         let mut p2align = 0;
@@ -141,4 +164,54 @@ pub fn ComputeSectionSizes(ctx: &mut Context) {
         osec.borrow_mut().Shdr.Size = offset;
         osec.borrow_mut().Shdr.AddrAlign = 1 << p2align;
     }
+}
+
+/// EHDR
+/// PHDRs
+/// .note
+/// alloc sections(.text .rodata .data ...)
+/// non-alloc sections (.symtab .debug .strtab ... )
+/// SHDRs
+pub fn SortOutputSections(ctx: &mut Context) {
+    let rank = |c: &mut dyn Chunker| -> u32 {
+        let ty = c.GetShdr().Type;
+        let flags = c.GetShdr().Flags;
+        let eptr = std::ptr::addr_of!(*ctx.Ehdr);
+        let sptr = std::ptr::addr_of!(*ctx.Shdr);
+
+        if flags & abi::SHF_ALLOC as u64 == 0 {
+            return u32::MAX - 1;
+        }
+        if std::ptr::eq(std::ptr::addr_of!(*c) as *const OutputShdr, sptr) {
+            return u32::MAX;
+        }
+        if std::ptr::eq(std::ptr::addr_of!(*c) as *const OutputEhdr, eptr) {
+            return 0;
+        }
+        if ty == abi::SHT_NOTE {
+            return 2;
+        }
+        let b2i = |b: bool| -> u32 {
+            match b {
+                true => 1,
+                false => 0
+            }
+        };
+
+        let writeable = b2i(flags & abi::SHF_WRITE as u64 != 0);
+        let notExec = b2i(flags & abi::SHF_EXECINSTR as u64 == 0);
+        let notTls = b2i(flags & abi::SHF_TLS as u64 == 0);
+        let isBss = b2i(ty == abi::SHT_NOBITS);
+        
+        return writeable << 7 | notExec << 6 | notTls << 5 | isBss << 4;
+    };
+
+    ctx.Chunks.sort_by_key(|c| {
+        unsafe {rank(&mut **c)}
+    })
+}
+
+pub fn isTbss(chunk: &mut dyn Chunker) -> bool {
+    let shdr = chunk.GetShdr();
+    shdr.Type == abi::SHT_NOBITS && shdr.Flags & abi::SHF_TLS as u64 != 0
 }

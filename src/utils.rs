@@ -17,13 +17,13 @@ pub fn Read<T: Sized>(data: &[u8]) -> T {
 }
 
 /// write an element into the buffer named `data`
-pub fn Write<T: Sized>(data: &mut [u8], elem: T) {
+pub fn Write<T: Sized>(data: &mut [u8], elem: &T) {
     let sz = size_of::<T>();
     if data.len() < sz {
         error!("failed to write. file length = {}, but write size = {sz}", data.len());
     }
 
-    let elem_ptr = std::ptr::addr_of!(elem) as *const u8;
+    let elem_ptr = std::ptr::addr_of!(*elem) as *const u8;
     let data_ptr = data.as_mut_ptr();
 
     unsafe {

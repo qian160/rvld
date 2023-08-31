@@ -59,12 +59,12 @@ impl Objectfile {
         }
 
         drop(o);
-        Objectfile::InitSections(obj.clone(), ctx);
-        Objectfile::InitSymbols(obj.clone(), ctx);
+        Objectfile::InitSections(&obj, ctx);
+        Objectfile::InitSymbols(&obj, ctx);
         Objectfile::InitMergeableSections(obj, ctx);
     }
 
-    fn InitSections(obj: Rc<RefCell<Self>>, ctx: &mut Context) {
+    fn InitSections(obj: &Rc<RefCell<Self>>, ctx: &mut Context) {
         let len = obj.borrow().ElfSections.len();
         obj.borrow_mut().Sections = vec![Default::default(); len];
         for i in 0..len {
@@ -116,7 +116,7 @@ impl Objectfile {
         self.SymtabShndxSec = ReadSlice::<u32>(&bytes);
     }
 
-    fn InitSymbols(file: Rc<RefCell<Self>>, ctx: &mut Context) {
+    fn InitSymbols(file: &Rc<RefCell<Self>>, ctx: &mut Context) {
         let mut obj = file.borrow_mut();
         if obj.SymTabSec.is_none(){
             return;

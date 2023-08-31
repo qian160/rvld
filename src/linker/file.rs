@@ -151,13 +151,10 @@ impl InputFile {
         let bytes = self.GetBytesFromShdr(symtab);
         let syms = ReadSlice::<Sym>(&bytes);
         self.ElfSyms.extend(syms.into_iter().map(Rc::new));
-        
-        //let mut n = bytes.len() / SYM_SIZE;
-        //while n > 0 {
-        //    self.ElfSyms.push(Rc::new(Read::<Sym>(&bytes)));
-        //    bytes = bytes[SYM_SIZE..].into();
-        //    n = n - 1;
-        //}
+    }
+
+    pub fn GetEhdr(&self) -> Ehdr {
+        Read::<Ehdr>(&self.Contents)
     }
 }
 

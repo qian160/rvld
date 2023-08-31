@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![deny(unused)]
 #![allow(unreachable_code)]
+
 mod utils;
 mod linker;
 mod debug;
@@ -43,15 +44,20 @@ fn main() {
     passes::RegisterSectionPieces(&mut ctx);
     passes::CreateSyntheticSections(&mut ctx);
     passes::BinSections(&mut ctx);
-
-    // it seems that these chunks have some problems...
     let chunks = passes::CollectOutputSections(&mut ctx);
-
     ctx.Chunks.extend(chunks);
 
-    warn!("#chunks = {}", ctx.Chunks.len());
+    debug!("#chunks = {}", ctx.Chunks.len());
 
     passes::ComputeSectionSizes(&mut ctx);
+    passes::SortOutputSections(&mut ctx);
+
+    warn!("after sort:");
+    for c in &ctx.Chunks {
+        let c = linker::output::ptr2ref_dyn(*c);
+        debug!("{}", c.GetName());
+        warn!("\n{:?}", c.GetShdr());
+    }
 
     let ctx_ptr = std::ptr::addr_of_mut!(ctx);
     // mark
@@ -60,7 +66,7 @@ fn main() {
         c.UpdateShdr(ctx_ptr);
     }
 
-    let fileSz = passes::GetFileSize(&mut ctx);
+    let fileSz = passes::SetOutputSectionOffsets(&mut ctx);
     debug!("file size = {fileSz}");
 
     let mut f = std::fs::OpenOptions::new()
@@ -79,25 +85,6 @@ fn main() {
     f.write_all(&ctx.Buf).unwrap();
 
     assert!(checkMagic(&ctx.Buf));
-
-    for obj in &ctx.Objs {
-        let o = obj.borrow();
-        if o.Name == "out/tests/hello/a.o" {
-            debug!("{}", o.Name);
-            info!("#sections = {}", o.ElfSections.len());
-            info!("#syms = {}", o.ElfSyms.len());
-            info!("size = {}", o.Contents.len());
-            for sym in &o.Symbols {
-                info!("{}",  sym.1.borrow().Name);
-                if let Some(f) = &sym.1.borrow().File{
-                    if let Some(parent) = &f.borrow().Parent {
-                        warn!("{}", parent.Name);
-                    }
-                }
-            }
-        }
-    }
-
 }
 
 pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {

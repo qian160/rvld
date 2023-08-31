@@ -36,9 +36,8 @@ pub struct Context {
     /// 
     /// note2: rust's built-in types `Rc` and `Refcell` has their own memory layout, which
     /// is not compatiable with c raw pointers. so we can't easily use std::ptr::addr_of to get the exact address
-    //pub Chunks:         Vec<Box<dyn Chunker>>,
+    /// &mut Rc<Refcell<T>> to *mut T:  &mut *T.as_ptr()
     pub Chunks:         Vec<*mut dyn Chunker>,
-    //pub Chunks:         Vec<Rc<RefCell<dyn Chunker>>>,
     // before generating outputfile, we will write the output data
     // to this internalobj. so it works as a buffer.
     // this internalobj also exits in ctx.objs, so use rc

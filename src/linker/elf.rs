@@ -3,6 +3,8 @@ pub const EHDR_SIZE: usize = core::mem::size_of::<Ehdr>();
 pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
 pub const PHDR_SIZE: usize = core::mem::size_of::<Phdr>();
 
+pub const IMAGE_BASE: usize = 0x200000;
+
 pub const MAGIC: &[u8] = b"\x7fELF";
 
 pub fn checkMagic(s: &[u8]) -> bool {
