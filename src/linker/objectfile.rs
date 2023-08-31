@@ -6,15 +6,27 @@ use super::elf::{Shdr, CheckFileCompatibility, Sym};
 use super::sections::{InputSection, MergeableSection, MergedSection, SplitSection};
 use super::symbol::Symbol;
 
-#[derive(Default,Debug)]
+#[derive(Debug)]
 pub struct Objectfile {
     pub inputFile:          Box<InputFile>,
-    pub SymTabSec:          Option<Box<Shdr>>,
+    pub SymTabSec:          *const Shdr,
 	pub SymtabShndxSec:     Vec<u32>,
 	pub Sections:           Vec<Option<Rc<RefCell<InputSection>>>>,
     pub MergeableSections:  Vec<Option<MergeableSection>>
     // todo: handle shndx = SHN_COMMON?
     //pub Commons:        Rc<RefCell<InputSection>> ?
+}
+
+impl Default for Objectfile {
+    fn default() -> Self {
+        Self { 
+            SymTabSec:  std::ptr::null(),
+            inputFile:  Default::default(),
+            Sections:   Default::default(),
+            SymtabShndxSec: Default::default(),
+            MergeableSections:  Default::default()
+        }
+    }
 }
 
 impl Deref for Objectfile {
@@ -40,7 +52,7 @@ impl Objectfile {
         }.ToRcRefcell();
         obj.borrow_mut().IsAlive = Alive;
         Objectfile::Parse(obj.clone(), ctx);
-        return obj;
+        obj
     }
 
     pub fn Name(&self) -> &String {
@@ -49,19 +61,21 @@ impl Objectfile {
 
     pub fn Parse(obj: Rc<RefCell<Objectfile>>, ctx: &mut Context) {
         let mut o = obj.borrow_mut();
-
         o.SymTabSec = o.FindSection(SHT_SYMTAB);
 
-        if let Some(symtab) = o.SymTabSec.clone() {
+        //if let Some(symtab) = o.SymTabSec.clone() {
+        if !o.SymTabSec.is_null() {
+            let symtab = unsafe {&*o.SymTabSec};
             o.FirstGlobal = symtab.Info as usize;
             o.FillUpElfSyms(&symtab);
-            o.SymbolStrTab = o.GetBytesFromIdx(symtab.Link as usize).into();
+            let slice =o.GetBytesFromIdx(symtab.Link as usize);
+            o.SymbolStrTab = ByteSequence::new(slice.as_ptr(), slice.len());
         }
 
         drop(o);
         Objectfile::InitSections(&obj, ctx);
         Objectfile::InitSymbols(&obj, ctx);
-        Objectfile::InitMergeableSections(obj, ctx);
+        Objectfile::InitMergeableSections(obj.clone(), ctx);
     }
 
     fn InitSections(obj: &Rc<RefCell<Self>>, ctx: &mut Context) {
@@ -81,7 +95,7 @@ impl Objectfile {
                     obj.borrow_mut().FillUpSymtabShndxSec(shdr);
                 },
                 _ => {
-                    let name = ElfGetName(&obj.borrow().Shstrtab, shdr.Name as usize);
+                    let name = ElfGetName(&obj.borrow().Shstrtab.GetSlice(), shdr.Name as usize);
                     let sec = InputSection::new(ctx, name, obj.clone(), i);
                     // error. we should follow the index, or use a btreemap?
                     //obj.borrow_mut().Sections.push(sec);
@@ -118,7 +132,7 @@ impl Objectfile {
 
     fn InitSymbols(file: &Rc<RefCell<Self>>, ctx: &mut Context) {
         let mut obj = file.borrow_mut();
-        if obj.SymTabSec.is_none(){
+        if obj.SymTabSec.is_null(){
             return;
         }
 
@@ -133,7 +147,7 @@ impl Objectfile {
         // constract file.symbols from esyms
         for i in 1..n_locals {
             let esym = &obj.ElfSyms[i];
-            let name = ElfGetName(&obj.SymbolStrTab, esym.Name as usize);
+            let name = ElfGetName(&obj.SymbolStrTab.GetSlice(), esym.Name as usize);
             let s = Symbol::new(&name);
             let mut sym = s.borrow_mut();
             sym.File = Some(file.clone());
@@ -149,7 +163,7 @@ impl Objectfile {
         let globals = n_locals..obj.ElfSyms.len();
         for i in globals {
             let esym = &obj.ElfSyms[i];
-            let name = ElfGetName(&obj.SymbolStrTab, esym.Name as usize);
+            let name = ElfGetName(&obj.SymbolStrTab.GetSlice(), esym.Name as usize);
             obj.Symbols.insert(i, Symbol::GetSymbolByName(ctx, &name));
         }
     }

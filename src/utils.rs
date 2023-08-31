@@ -1,6 +1,31 @@
 use std::{mem::size_of, rc::Rc, cell::RefCell};
 use crate::error;
 
+/// a substitute for slice type, used in struct members.
+/// the purpose is to avoid copy.
+/// slice is difficult to use since it takes a lifetime parameter
+#[derive(Debug)]
+pub struct ByteSequence(pub *const u8, pub usize);
+
+impl Default for ByteSequence {
+    fn default() -> Self {
+        Self(std::ptr::null(), 0)
+    }
+}
+
+impl ByteSequence {
+	pub fn new(p: *const u8, len: usize) -> Self {
+		Self(p, len)
+	}
+
+	pub fn GetSlice(&self) -> &[u8] {
+		let ptr = self.0;
+		let len = self.1;
+		unsafe {std::slice::from_raw_parts(ptr, len)}
+	}
+}
+
+
 pub fn Read<T: Sized>(data: &[u8]) -> T {
     let sz = size_of::<T>();
     if data.len() < sz {

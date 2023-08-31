@@ -5,7 +5,6 @@ use super::elf::{SHDR_SIZE, EHDR_SIZE, checkMagic};
 use super::archive::ReadArchiveMembers;
 use super::symbol::Symbol;
 use crate::utils::{Read, ReadSlice};
-use std::path::Path;
 
 use super::common::*;
 
@@ -25,8 +24,10 @@ pub struct InputFile {
     pub ElfSections:    Vec<Shdr>,
     pub ElfSyms:        Vec<Rc<Sym>>,
     pub FirstGlobal:    usize,
-    pub Shstrtab:       Vec<u8>,
-    pub SymbolStrTab:   Vec<u8>,
+    //pub Shstrtab:       Vec<u8>,
+    //pub SymbolStrTab:   Vec<u8>,
+    pub Shstrtab:       ByteSequence,
+    pub SymbolStrTab:   ByteSequence,
     pub IsAlive:        bool,
     /// use `shndx` as the key
     pub Symbols:        BTreeMap<usize, Rc<RefCell<Symbol>>>,
@@ -55,10 +56,8 @@ impl File {
         }
         else if checkMagic(&Contents) {
             ft = match Read::<u16>(&Contents[16..]) {
-                abi::ET_REL => 
-                    FileType::FileTypeObject,
-                _ =>
-                    FileType::FileTypeUnknown
+                abi::ET_REL => FileType::FileTypeObject,
+            _ =>    FileType::FileTypeUnknown
             };
         }
         else if Contents.starts_with(super::archive::AR_IDENT) {
@@ -99,12 +98,19 @@ impl InputFile {
 
         let contents = &f.File.Contents[ehdr.ShOff as usize.. ];
         let shdr = Read::<Shdr>(&contents);
-
         let link = shdr.Link;
-        f.ElfSections = vec![shdr];
 
+        // if the number of section header is larger than or equal to SHN_LORSERVE,
+        // ehdr.shnum holds the value zero and the real number of entries in the section
+        // header table is held in the shdr.size of the first entry in section header table
+        let numSections = match ehdr.ShNum {
+            0 => shdr.Size, 
+            _ =>ehdr.ShNum as usize
+        };
+
+        f.ElfSections = vec![shdr];
         // read shdr
-        contents.chunks_exact(SHDR_SIZE).skip(1).for_each(
+        contents.chunks_exact(SHDR_SIZE).skip(1).take(numSections).for_each(
             |shdr| {
                 f.ElfSections.push(Read::<Shdr>(shdr));
             }
@@ -115,20 +121,20 @@ impl InputFile {
         if ehdr.ShStrndx == abi::SHN_XINDEX {
             shstrndx = link as usize;
         }
-        f.Shstrtab = f.GetBytesFromIdx(shstrndx).into();
+        let slice = f.GetBytesFromIdx(shstrndx);
+
+        f.Shstrtab = ByteSequence::new(slice.as_ptr(), slice.len());
 
         Box::new(f)
     }
 
-    pub fn FindSection(&self, ty: u32) -> Option<Box<Shdr>> {
+    pub fn FindSection(&self, ty: u32) -> *const Shdr {
         for shdr in self.ElfSections.iter() {
             if shdr.Type == ty {
-                return Some(
-                    Box::new((*shdr).clone())
-                );
+                return &*shdr;
             }
         }
-        None
+        std::ptr::null()
     }
 
     pub fn GetBytesFromShdr(&self, s: &Shdr) -> &[u8] {
@@ -171,19 +177,24 @@ pub fn ReadInputFiles(ctx: &mut Context, remaining: Vec<String>) {
 }
 
 pub fn ReadFile(ctx: &mut Context, file: Rc<File>) {
+//    let start = std::time::Instant::now();
     match file.Type {
         // at first we assume all the objects in the archive will not be used by the 
         // program. however later we will find what is actually needed and correct it
         FileType::FileTypeObject => {
             let obj = Objectfile::new(ctx, file, true);
             ctx.Objs.push(obj);
+//            let e = start.elapsed();
+//            info!("read objfile finished: {:?}", e);
         },
         FileType::FileTypeArchive => {
-            for child in ReadArchiveMembers(file.into()) {
+            for child in ReadArchiveMembers(file) {
                 assert!(child.Type == FileType::FileTypeObject);
                 let obj = Objectfile::new(ctx, child, false);
                 ctx.Objs.push(obj);
             }
+//            let e = start.elapsed();
+//            warn!("read archive finished: {:?}", e);
         },
         _ => {
             error!("unknown file type!");
@@ -192,9 +203,10 @@ pub fn ReadFile(ctx: &mut Context, file: Rc<File>) {
 }
 
 pub fn OpenLibrary(path: &str) -> Option<Rc<File>> {
-	match Path::exists(Path::new(path)) {
-		true  => Some(File::new(path, None, None)),
-		false => None 
+	match std::fs::read(path) {
+        Ok(Contents) =>
+            Some(File::new(path, Some(Contents), None)),
+        Err(_) => None
 	}
 }
 
@@ -203,8 +215,9 @@ pub fn FindLibrary(ctx: &Context, name: &str) -> Option<Rc<File>> {
 		let stem = dir.to_owned() + "/lib" + name + ".a";
 		let f = OpenLibrary(&stem);
 		if f.is_some() {
-			return Some(f.unwrap());
+			return f;
 		}
 	}
+    error!("library not found");
 	None
 }

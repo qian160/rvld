@@ -9,6 +9,7 @@ use super::sections::InputSection;
 #[derive(Default,Debug, Clone)]
 pub struct Chunk {
     pub Name:   String,
+	/// this is only used during linking, and will not be put into target file
     pub Shdr:   Shdr,
 	pub Shndx:	usize,
 }
@@ -34,13 +35,11 @@ impl Chunker for Chunk {
 	fn GetShndx(&self) -> usize { self.Shndx }
 }
 
-/// this will be used for writing output file's ehdr
 #[derive(Default, Clone)]
 pub struct OutputEhdr {
 	pub Chunk: Chunk
 }
 
-/// this will be used for writing output file's shdr
 #[derive(Default, Clone)]
 pub struct OutputShdr {
 	pub Chunk: Chunk
@@ -173,7 +172,6 @@ impl Chunker for OutputShdr {
 		for c in &mut ctx.Chunks {
 			let c = ptr2ref_dyn(*c);
 			if c.GetShndx() > 0 {
-				error!("1");
 				utils::Write::<Shdr>(
 					&mut base[c.GetShndx() * SHDR_SIZE..],
 						c.GetShdr()

@@ -38,7 +38,7 @@ impl ArHdr {
 		atoi(&self.Size)
 	}
 
-	pub fn ReadName(&self, strtab: &Vec<u8>) -> String {
+	pub fn ReadName(&self, strtab: &[u8]) -> String {
 		// long filename
 		if self.Name.starts_with(b"/") {
 			let start = atoi(&self.Name[1..]);
@@ -56,7 +56,7 @@ pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Rc<File>>{
 	assert!(file.Type == FileType::FileTypeArchive);
 
 	let mut pos = 8;	
-	let mut strTab: Vec<u8> = vec![];
+	let mut strTab = ByteSequence::default();
 	let mut files: Vec<Rc<File>> = vec![];
 	let contents = &file.Contents;
 	let len = contents.len();
@@ -75,12 +75,12 @@ pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Rc<File>>{
 			continue;
 		}
 		else if hdr.IsStrtab() {
-			strTab = contents.into();
+			strTab = ByteSequence::new(contents.as_ptr(), contents.len());
 			continue;
 		}
 
 		let f = File::new(
-			&hdr.ReadName(&strTab), 
+			&hdr.ReadName(strTab.GetSlice()),
 			Some(contents.into()),
 			Some(file.clone())
 		);

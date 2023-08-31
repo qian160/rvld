@@ -1,4 +1,5 @@
 //! a further abstractions for elf sections, making it easier to use
+
 use crate::linker::output::GetOutputSection;
 
 use super::elf::ElfGetName;
@@ -12,10 +13,11 @@ use super::common::*;
 // the input section is a high level view of abstraction.
 // an input section(like .text) consists of some objs and other
 // inforamtions, and is described by a Shdr
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub struct InputSection {
 	pub File: 		Rc<RefCell<Objectfile>>,
-	pub	Contents:	Box<[u8]>,
+	// no copy, but still works slowly?
+	pub Contents:	ByteSequence,
 	//pub	Contents:	Vec<u8>,
 	pub Shndx:		usize,
 	/// the `Size` field from shdr
@@ -78,8 +80,10 @@ impl InputSection {
 
 		let start = shdr.Offset;
 		let end = shdr.Offset + shdr.Size;
-
-		s.Contents = Box::from(&s.File.borrow().Contents[start..end]);
+		// mark
+		let start_ptr = s.File.borrow().Contents[start..].as_ptr();
+		s.Contents = ByteSequence::new(start_ptr, end - start);
+//		s.Contents = Box::from(&s.File.borrow().Contents[start..end]);
 		//s.Contents = s.File.borrow().Contents[start..end].into();
 
 
@@ -103,7 +107,7 @@ impl InputSection {
 	}
 
 	pub fn Name(&self) -> String {
-		ElfGetName(&self.File.borrow().Shstrtab, self.Shdr().Name as usize)
+		ElfGetName(&self.File.borrow().Shstrtab.GetSlice(), self.Shdr().Name as usize)
 	}
 
 	pub fn WriteTo(&mut self, buf: &mut [u8]) {
@@ -114,7 +118,8 @@ impl InputSection {
 
 	// mark
 	fn CopyContents(&mut self, buf: &mut [u8]) {
-		buf[..self.Contents.len()].copy_from_slice(&self.Contents[..]);
+		let slice = self.Contents.GetSlice();
+		buf[..self.Contents.1].copy_from_slice(slice);
 	}
 }
 
@@ -216,7 +221,7 @@ pub fn SplitSection(ctx: &mut Context, isec: Rc<RefCell<InputSection>>) -> Box<M
 	m.Parent = MergedSection::GetInstance(ctx, &isec.Name(), shdr.Type, shdr.Flags);
 	m.P2Align = isec.P2Align;
 
-	let mut data = &isec.Contents[..];
+	let mut data = isec.Contents.GetSlice();
 	let mut offset = 0;
 	if shdr.Flags & abi::SHF_STRINGS as u64 != 0 {
 		while data.len() > 0 {

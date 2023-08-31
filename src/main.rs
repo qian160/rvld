@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-#![deny(unused)]
+//#![deny(unused)]
 #![allow(unreachable_code)]
 
 mod utils;
@@ -51,13 +51,6 @@ fn main() {
 
     passes::ComputeSectionSizes(&mut ctx);
     passes::SortOutputSections(&mut ctx);
-
-    warn!("after sort:");
-    for c in &ctx.Chunks {
-        let c = linker::output::ptr2ref_dyn(*c);
-        debug!("{}", c.GetName());
-        warn!("\n{:?}", c.GetShdr());
-    }
 
     let ctx_ptr = std::ptr::addr_of_mut!(ctx);
     // mark
