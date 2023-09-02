@@ -42,6 +42,8 @@ fn main() {
     passes::CreateInternalFile(&mut ctx);   debug!("before: #objs = {}", ctx.Objs.len());
     passes::ResolveSymbols(&mut ctx);       debug!("after: #objs = {}", ctx.Objs.len());
     passes::RegisterSectionPieces(&mut ctx);
+    passes::ConvertCommonSymbols(&mut ctx);
+    passes::ComputeMergedSectionSizes(&mut ctx);
     passes::CreateSyntheticSections(&mut ctx);
     passes::BinSections(&mut ctx);
     let chunks = passes::CollectOutputSections(&mut ctx);
@@ -76,7 +78,6 @@ fn main() {
     }
 
     f.write_all(&ctx.Buf).unwrap();
-
     assert!(checkMagic(&ctx.Buf));
 }
 

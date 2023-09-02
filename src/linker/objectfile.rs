@@ -1,25 +1,25 @@
 use super::common::*;
-use super::elf::ElfGetName;
 use elf::abi::*;
 use super::file::{InputFile, File};
-use super::elf::{Shdr, CheckFileCompatibility, Sym};
-use super::sections::{InputSection, MergeableSection, MergedSection, SplitSection};
+use super::elf::{CheckFileCompatibility, Sym, ElfGetName};
+use super::inputsections::{InputSection, MergeableSection, SplitSection};
 use super::symbol::Symbol;
+use super::output::MergedSection;
 
 #[derive(Debug)]
 pub struct Objectfile {
+    pub hasCommon:          bool,
     pub inputFile:          Box<InputFile>,
     pub SymTabSec:          *const Shdr,
 	pub SymtabShndxSec:     Vec<u32>,
 	pub Sections:           Vec<Option<Rc<RefCell<InputSection>>>>,
     pub MergeableSections:  Vec<Option<MergeableSection>>
-    // todo: handle shndx = SHN_COMMON?
-    //pub Commons:        Rc<RefCell<InputSection>> ?
 }
 
 impl Default for Objectfile {
     fn default() -> Self {
         Self { 
+            hasCommon:  false,
             SymTabSec:  std::ptr::null(),
             inputFile:  Default::default(),
             Sections:   Default::default(),
@@ -148,6 +148,10 @@ impl Objectfile {
         for i in 1..n_locals {
             let esym = &obj.ElfSyms[i];
             let name = ElfGetName(&obj.SymbolStrTab.GetSlice(), esym.Name as usize);
+            if esym.IsCommon() {
+                error!("{name}: common local symbol?");
+            }
+
             let s = Symbol::new(&name);
             let mut sym = s.borrow_mut();
             sym.File = Some(file.clone());
@@ -162,8 +166,10 @@ impl Objectfile {
 
         let globals = n_locals..obj.ElfSyms.len();
         for i in globals {
-            let esym = &obj.ElfSyms[i];
-            let name = ElfGetName(&obj.SymbolStrTab.GetSlice(), esym.Name as usize);
+            if obj.ElfSyms[i].IsCommon() {
+                obj.hasCommon = true;
+            }
+            let name = ElfGetName(&obj.SymbolStrTab.GetSlice(), obj.ElfSyms[i].Name as usize);
             obj.Symbols.insert(i, Symbol::GetSymbolByName(ctx, &name));
         }
     }
@@ -183,26 +189,18 @@ impl Objectfile {
     /// try to find out where the symbols come from, or the owner of each symbol
     pub fn ResolveSymbols(o: &Rc<RefCell<Self>>) {
         let obj = o.borrow_mut();
-        // local symbols dont need to resolve
-        // the ith global symbol
+        // local symbols dont need to resolve, they just belong to that file
         for i in obj.FirstGlobal..obj.ElfSyms.len() {
-            let mut sym = obj.Symbols.get(&i).unwrap().borrow_mut();
             let esym = &obj.ElfSyms[i];
+            let mut sym = obj.Symbols.get(&i).unwrap().borrow_mut();
 
             if esym.IsUndef() {
-                // nothing we can do here, impossible to find out where that symbol comes from
-                continue;
-            }
-
-            // common symbols do not have a particular input section
-            // just skip here(temp solution)
-            if esym.IsCommon() {
                 continue;
             }
 
             let mut isec = None;
             // absolute symbols dont have related sections
-            if esym.IsAbs() == false {
+            if !esym.IsAbs() && !esym.IsCommon() {
                 isec = obj.GetSection(esym, i);
                 if isec.is_none() {
                     continue;
@@ -219,6 +217,60 @@ impl Objectfile {
                 sym.SymIdx = i;
             }
         }
+    }
+
+    /// bug?
+    pub fn ConvertCommonSymbols(o: &Rc<RefCell<Self>>, ctx: *mut Context) {
+        let mut obj = o.borrow_mut();
+        if !obj.hasCommon {
+            return;
+        }
+        for i in obj.FirstGlobal..obj.ElfSyms.len() {
+            let esym = obj.ElfSyms[i].clone();
+            let sym = obj.Symbols.get(&i).unwrap().clone();
+            let mut sym = sym.borrow_mut();
+            if !esym.IsCommon() {
+                continue;
+            }
+
+            if let Some(file) = &sym.File {
+                let p1 = file.as_ptr() as *const _;
+                let p2 = o.as_ptr() as *const _;
+                if !std::ptr::eq(p1, p2) {
+                    let name = &sym.Name;
+                    warn!("{name}: multiple common symbols");
+                    continue;
+                }
+
+                obj.ElfSections2.push(Default::default());
+                let mut shdr = Shdr{..Default::default()};
+                let name: String;
+
+                (name, shdr.Flags) = match esym.Type() {
+                    abi::STT_TLS =>
+                        (".tls_common".into(),
+                        (abi::SHF_ALLOC | abi::SHF_WRITE | abi::SHF_TLS) as u64),
+                    _ => 
+                        (".common".into(),
+                        (abi::SHF_ALLOC | abi::SHF_WRITE) as u64)
+                };
+
+                shdr.Type = abi::SHT_NOBITS;
+                shdr.Size = obj.ElfSyms[i].Size as usize;
+                shdr.AddrAlign = obj.ElfSyms[i].Val as usize;
+
+                let idx = obj.ElfSections.len() + obj.ElfSections2.len() - 1;
+                drop(esym);
+                let isec = InputSection::new(ptr2ref(ctx), name, o.clone(), idx);
+
+                sym.File = Some(o.clone());
+                sym.SetInputSection(Some(isec.clone()));
+                sym.Value = 0;
+                sym.SymIdx = i;
+                obj.Sections.push(Some(isec));
+            };
+        }
+        //todo!()
     }
 
     pub fn MarkLiveObjects(&mut self, roots: &mut Vec<Rc<RefCell<Objectfile>>>) {

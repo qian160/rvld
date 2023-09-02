@@ -3,9 +3,7 @@
 use crate::linker::output::GetOutputSection;
 
 use super::elf::ElfGetName;
-use super::output::{Chunk, OutputSection};
-use super::elf::Shdr;
-use super::output::GetOutputName;
+use super::output::{OutputSection, MergedSection};
 
 use super::common::*;
 
@@ -30,12 +28,6 @@ pub struct InputSection {
 	pub OutputSection:	Rc<RefCell<OutputSection>>,
 }
 
-#[derive(Default,Debug)]
-pub struct MergedSection {
-	pub Chunk:	Chunk,
-	pub Map:	BTreeMap<String, Box<SectionFragment>>,
-}
-
 #[derive(Default,Debug, Clone)]
 pub struct MergeableSection {
 	pub Parent:		Rc<RefCell<MergedSection>>,
@@ -53,19 +45,6 @@ pub struct SectionFragment {
 	pub	IsAlive:		bool,
 }
 
-impl Deref for MergedSection {
-	type Target = Chunk;
-	fn deref(&self) -> &Self::Target {
-		&self.Chunk
-	}
-}
-
-impl DerefMut for MergedSection {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.Chunk
-	}
-}
-
 impl InputSection {
 	pub fn new(ctx: &mut Context, name: String, file: Rc<RefCell<Objectfile>>, shndx: usize) -> Rc<RefCell<Self>>{
 		let mut s = InputSection {
@@ -80,12 +59,10 @@ impl InputSection {
 
 		let start = shdr.Offset;
 		let end = shdr.Offset + shdr.Size;
-		// mark
-		let start_ptr = s.File.borrow().Contents[start..].as_ptr();
+		// to avoid borrow checks...
+		let ptr = unsafe {&*s.File.as_ptr()};
+		let start_ptr = ptr.Contents[start..].as_ptr();
 		s.Contents = ByteSequence::new(start_ptr, end - start);
-//		s.Contents = Box::from(&s.File.borrow().Contents[start..end]);
-		//s.Contents = s.File.borrow().Contents[start..end].into();
-
 
 		s.ShSize = shdr.Size;
 		s.P2Align = match shdr.AddrAlign {
@@ -99,11 +76,11 @@ impl InputSection {
 	/// this function is not so friendly...we must not own any
 	/// mutable borrow of that objectfile before calling this fn
 	pub fn Shdr(&self) -> &Shdr {
-        let obj = self.File.borrow();
-		assert!(self.Shndx < obj.ElfSections.len());
-        unsafe {
-            std::ptr::addr_of!(obj.ElfSections[self.Shndx]).as_ref().unwrap()
-        }
+		let obj = unsafe { &*self.File.as_ptr() };
+		if self.Shndx < obj.ElfSections.len() {
+			return &obj.ElfSections[self.Shndx];
+		}
+		return &obj.ElfSections2[self.Shndx - obj.ElfSections.len()];
 	}
 
 	pub fn Name(&self) -> String {
@@ -141,63 +118,6 @@ impl MergeableSection {
 			offset - self.FragOffset[idx]
 		);
 	}
-}
-
-impl MergedSection {
-	pub fn new(name: &str, flags: u64, ty: u32) -> Rc<RefCell<MergedSection>> {
-		let mut m = MergedSection {
-			Chunk: Chunk::new(),
-			..Default::default()
-		};
-
-		m.Name = name.into();
-		m.Shdr.Flags = flags;
-		m.Shdr.Type = ty;
-
-		m.ToRcRefcell()
-	}
-
-	pub fn GetInstance(ctx: &mut Context, name: &str, ty: u32, flags: u64) -> Rc<RefCell<Self>> {
-		let name = GetOutputName(name, flags);
-		// ignore these flags
-		let flags = flags &
-			!abi::SHF_GROUP as u64 & !abi::SHF_MERGE as u64 &
-			!abi::SHF_STRINGS as u64 & !abi::SHF_COMPRESSED as u64;
-
-		let osec = ctx.MergedSections.iter().find(
-			|osec| {
-				let osec = osec.borrow();
-				name == osec.Name && flags == osec.Shdr.Flags && ty == osec.Shdr.Type
-			}
-		);
-
-		match osec {
-			Some(o) => o.clone(),
-			None => {
-				let osec = MergedSection::new(&name, flags, ty);
-				ctx.MergedSections.push(osec.clone());
-				osec
-			}
-		}
-	}
-
-	pub fn Insert(m: Rc<RefCell<Self>>, key: String, p2align: u8) -> Box<SectionFragment> {
-		let mut ms = m.borrow_mut();
-		let exist = ms.Map.get(&key).is_some();
-
-		let mut frag;
-		if !exist {
-			frag = SectionFragment::new(m.clone());
-			ms.Map.insert(key, frag.clone());
-		}
-		else {
-			frag = ms.Map.get(&key).unwrap().clone();
-		}
-
-		frag.P2Align = frag.P2Align.max(p2align);
-		frag.clone()
-	}
-
 }
 
 impl SectionFragment {
@@ -258,7 +178,6 @@ pub fn SplitSection(ctx: &mut Context, isec: Rc<RefCell<InputSection>>) -> Box<M
 /// entsize = 1 => "foo\0"
 /// entsize = 4 => "f\0\0\0o\0\0\0o\0\0\0\0\0\0\0"
 pub fn FindNull(data: &[u8], entSize: usize) -> usize {
-
     if entSize == 1 {
         return data.iter().position(|x| *x == 0 ).unwrap();
     }

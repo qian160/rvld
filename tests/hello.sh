@@ -1,5 +1,5 @@
 #!/bin/bash
-CC=riscv64-linux-gnu-gcc
+CC=riscv64-linux-gnu-gcc-10
 test_name=$(basename "$0" .sh)
 t=out/tests/$test_name
 

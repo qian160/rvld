@@ -127,7 +127,7 @@ pub struct Sym {
     /// value is non-zero, it represents a string table index that gives the
     /// symbol name. Otherwise, the symbol table entry has no name.
 	pub Name:       u32,
-    /// This member specifies the symbol's type and binding attributes.
+    /// This member specifies the symbol's type and binding attributes. each 4 bits
 	pub Info:       u8,
 	/// This member currently specifies a symbol's visibility.
 	pub Other:      u8,
@@ -203,6 +203,10 @@ impl Sym {
 	pub fn IsCommon(&self) -> bool {
 		self.Shndx == abi::SHN_COMMON
 	}
+    /// little endian
+    pub fn Type(&self) -> u8 {
+        self.Info & 0b1111
+    }
 }
 
 pub fn GetMachineType(file: &File) -> MachineType {
@@ -227,8 +231,8 @@ pub fn GetMachineType(file: &File) -> MachineType {
 #[allow(unused)]
 pub fn ElfGetName(strtab: &[u8], offset: usize) -> String {
     let length = strtab[offset..].iter().position(|&x| x == 0).unwrap();
-    std::str::from_utf8(
-		&strtab[offset..offset+length]).unwrap().into()
+    unsafe { std::string::String::from_utf8_unchecked(
+		(strtab[offset..offset+length]).to_vec())}
 }
 
 pub fn CheckFileCompatibility(ctx: &Context, file: &File) {

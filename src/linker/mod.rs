@@ -6,6 +6,7 @@ pub mod passes;
 pub mod objectfile;
 
 pub mod output;
-mod sections;
+mod inputsections;
 mod symbol;
 mod common;
+mod chunker;

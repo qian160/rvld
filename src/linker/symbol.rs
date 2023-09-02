@@ -1,6 +1,5 @@
 use super::elf::Sym;
-use super::sections::{InputSection, SectionFragment};
-
+use super::inputsections::{InputSection, SectionFragment};
 use super::common::*;
 
 // an easier-to-use abstraction for Sym

@@ -89,3 +89,12 @@ impl<T> ToRcRefcell for T {
         Rc::new(RefCell::new(self))
     }
 }
+
+/// an ugly function to deal with rust's borrow rules...
+//pub fn ptr2ref(ctx_ptr: *mut Box<Context>) -> &'static mut Box<Context> {
+//	unsafe{&mut *ctx_ptr}
+//}
+
+pub fn ptr2ref<T>(ptr: *mut T) -> &'static mut T {
+	unsafe {&mut *ptr}
+}

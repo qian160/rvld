@@ -1,9 +1,6 @@
 use elf::abi::EF_RISCV_RVC;
-use crate::utils;
-
-use super::elf::{Shdr, EHDR_SIZE, Ehdr, MAGIC, PHDR_SIZE, SHDR_SIZE};
 use super::common::*;
-use super::sections::InputSection;
+use super::inputsections::{InputSection, SectionFragment};
 
 /// an abstract base writting unit
 #[derive(Default,Debug, Clone)]
@@ -12,27 +9,6 @@ pub struct Chunk {
 	/// this is only used during linking, and will not be put into target file
     pub Shdr:   Shdr,
 	pub Shndx:	usize,
-}
-
-pub trait Chunker {
-	fn GetShdr(&mut self) -> &mut Shdr;
-	fn GetName(&self) -> &String;
-	fn GetShndx(&self) -> usize;
-
-	// use raw pointer to avoid some borrow checks
-	/// get some data from the chunk and copy it to a buffer(usually ctx.Buf)
-	fn CopyBuf(&mut self, ctx: *mut Box<Context>);
-	/// for output section's shdr
-	fn UpdateShdr(&mut self, ctx: *mut Box<Context>);
-}
-
-impl Chunker for Chunk {
-	fn CopyBuf(&mut self, _ctx: *mut Box<Context>) { /*parent defined*/ }
-	fn UpdateShdr(&mut self, _ctx: *mut Box<Context>) {}
-
-	fn GetName(&self) -> &String { &self.Name }
-	fn GetShdr(&mut self) -> &mut Shdr 	{ &mut self.Shdr }
-	fn GetShndx(&self) -> usize { self.Shndx }
 }
 
 #[derive(Default, Clone)]
@@ -51,6 +27,26 @@ pub struct OutputSection {
 	pub Members:	Vec<Rc<RefCell<InputSection>>>,
 	// shndx? 
 	pub Idx:		usize,
+}
+
+#[derive(Default,Debug)]
+pub struct MergedSection {
+	pub Chunk:	Chunk,
+	/// note: key is not always strings
+	pub Map:	BTreeMap<String, Box<SectionFragment>>,
+}
+
+impl Deref for MergedSection {
+	type Target = Chunk;
+	fn deref(&self) -> &Self::Target {
+		&self.Chunk
+	}
+}
+
+impl DerefMut for MergedSection {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.Chunk
+	}
 }
 
 impl Deref for OutputSection {
@@ -79,6 +75,13 @@ impl DerefMut for OutputShdr {
 	}
 }
 
+impl Deref for OutputEhdr {
+	type Target = Chunk;
+	fn deref(&self) -> &Self::Target {
+		&self.Chunk
+	}
+}
+
 impl Chunk {
     pub fn new() -> Self {
         Chunk {
@@ -89,13 +92,6 @@ impl Chunk {
             ..Default::default()
         }
     }
-}
-
-impl Deref for OutputEhdr {
-	type Target = Chunk;
-	fn deref(&self) -> &Self::Target {
-		&self.Chunk
-	}
 }
 
 impl OutputEhdr {
@@ -109,87 +105,7 @@ impl OutputEhdr {
 		};
 
 		Chunk.Shdr = shdr;
-		
 		Box::new(OutputEhdr { Chunk })
-	}
-}
-
-impl OutputShdr {
-	pub fn new() -> Box<Self> {
-		let mut o = OutputShdr{Chunk: Chunk::new()};
-		o.Shdr.AddrAlign = 8;
-		Box::new(o)
-	}
-}
-
-impl Chunker for OutputEhdr {
-	fn CopyBuf(&mut self, ctx: *mut Box<Context>){
-		let mut ehdr = Ehdr{..Default::default()};
-		ehdr.Ident[0..4].copy_from_slice(MAGIC);
-		ehdr.Ident[abi::EI_CLASS] = abi::ELFCLASS64;
-		ehdr.Ident[abi::EI_DATA] = abi::ELFDATA2LSB;
-		ehdr.Ident[abi::EI_VERSION] = abi::EV_CURRENT;
-		ehdr.Ident[abi::EI_OSABI] = 0;
-		ehdr.Ident[abi::EI_ABIVERSION] = 0;
-		ehdr.Type = abi::ET_EXEC;
-		ehdr.Machine = abi::EM_RISCV;
-		ehdr.Version = abi::EV_CURRENT as u32;
-		ehdr.Entry = GetEntryAddr(ctx);
-		ehdr.ShOff = ptr2ref(ctx).Shdr.Shdr.Offset as u64;
-		ehdr.Flags = GetFlags(ctx);
-		ehdr.EhSize = EHDR_SIZE as u16;
-		ehdr.PhEntSize = PHDR_SIZE as u16;
-
-		ehdr.ShEntSize = SHDR_SIZE as u16;
-		ehdr.ShNum = (ptr2ref(ctx).Shdr.Shdr.Size / SHDR_SIZE) as u16;
-
-		debug!("\n{:?}", ehdr);
-
-		let ehdr_ptr = std::ptr::addr_of!(ehdr) as *const u8;
-		let ctx = ptr2ref(ctx);
-		ctx.Buf[0..EHDR_SIZE]
-			.copy_from_slice(unsafe{
-			std::slice::from_raw_parts(ehdr_ptr, EHDR_SIZE)
-		});
-	}
-
-	fn UpdateShdr(&mut self, _: *mut Box<Context>) {/* do nothing */}
-	fn GetShndx(&self) -> usize { self.Chunk.GetShndx()}
-	fn GetShdr(&mut self) -> &mut Shdr 	{ self.Chunk.GetShdr() }
-	fn GetName(&self) -> &String { self.Chunk.GetName() }
-}
-
-impl Chunker for OutputShdr {
-	fn GetName(&self) -> &String { &self.Chunk.GetName() }
-	fn GetShdr(&mut self) -> &mut Shdr 	{ self.Chunk.GetShdr() }
-	fn GetShndx(&self) -> usize { self.Chunk.GetShndx() }
-
-	fn CopyBuf(&mut self, ctx: *mut Box<Context>) {
-		let ctx = ptr2ref(ctx);
-		let base = &mut ctx.Buf[self.Shdr.Offset..];
-		utils::Write::<Shdr>(base, &Shdr{..Default::default()});
-		// write output file's shdr
-		for c in &mut ctx.Chunks {
-			let c = ptr2ref_dyn(*c);
-			if c.GetShndx() > 0 {
-				utils::Write::<Shdr>(
-					&mut base[c.GetShndx() * SHDR_SIZE..],
-						c.GetShdr()
-				);
-			}
-		}
-	}
-
-	// mark
-	fn UpdateShdr(&mut self, ctx: *mut Box<Context>) {
-		let ctx = ptr2ref(ctx);
-		// all 0s at present
-		let n = ctx.Chunks.iter()
-			.map(|chunk| unsafe {&mut **chunk}.GetShndx())
-			.max()
-			.unwrap_or(0);
-
-		self.Shdr.Size = (n + 1) * SHDR_SIZE;
 	}
 }
 
@@ -208,27 +124,89 @@ impl OutputSection {
 	}
 }
 
-impl Chunker for OutputSection {
-	fn GetName(&self) -> &String { &self.Chunk.GetName() }
-	fn GetShdr(&mut self) -> &mut Shdr  { self.Chunk.GetShdr() }
-	//fn GetShndx(&self) -> usize { self.Idx }
-	fn GetShndx(&self) -> usize { self.Chunk.GetShndx() }
 
-	fn CopyBuf(&mut self, ctx: *mut Box<Context>) {
-		if self.Shdr.Type == abi::SHT_NOBITS {
-			return;
-		}
+impl OutputShdr {
+	pub fn new() -> Box<Self> {
+		let mut o = OutputShdr{Chunk: Chunk::new()};
+		o.Shdr.AddrAlign = 8;
+		Box::new(o)
+	}
+}
 
-		let ctx = ptr2ref(ctx);
-		let base = &mut ctx.Buf[self.Shdr.Offset..];
-		for isec in &self.Members {
-			let mut isec = isec.borrow_mut();
-			let buf = &mut base[isec.Offset..];
-			isec.WriteTo(buf);
+impl MergedSection {
+	pub fn new(name: &str, flags: u64, ty: u32) -> Rc<RefCell<MergedSection>> {
+		let mut m = MergedSection {
+			Chunk: Chunk::new(),
+			..Default::default()
+		};
+
+		m.Name = name.into();
+		m.Shdr.Flags = flags;
+		m.Shdr.Type = ty;
+
+		m.ToRcRefcell()
+	}
+
+	pub fn GetInstance(ctx: &mut Context, name: &str, ty: u32, flags: u64) -> Rc<RefCell<Self>> {
+		let name = GetOutputName(name, flags);
+		// ignore these flags
+		let flags = flags &
+			!abi::SHF_GROUP as u64 & !abi::SHF_MERGE as u64 &
+			!abi::SHF_STRINGS as u64 & !abi::SHF_COMPRESSED as u64;
+
+		let osec = ctx.MergedSections.iter().find(
+			|osec| {
+				let osec = osec.borrow();
+				name == osec.Name && flags == osec.Shdr.Flags && ty == osec.Shdr.Type
+			}
+		);
+
+		match osec {
+			Some(o) => o.clone(),
+			None => {
+				let osec = MergedSection::new(&name, flags, ty);
+				ctx.MergedSections.push(osec.clone());
+				osec
+			}
 		}
 	}
 
-	fn UpdateShdr(&mut self, _ctx: *mut Box<Context>) {}
+	pub fn Insert(m: Rc<RefCell<Self>>, key: String, p2align: u8) -> Box<SectionFragment> {
+		let mut ms = m.borrow_mut();
+		let exist = ms.Map.get(&key).is_some();
+
+		let mut frag;
+		if !exist {
+			frag = SectionFragment::new(m.clone());
+			ms.Map.insert(key, frag.clone());
+		}
+		else {
+			frag = ms.Map.get(&key).unwrap().clone();
+		}
+
+		frag.P2Align = frag.P2Align.max(p2align);
+		frag.clone()
+	}
+
+	pub fn AssignOffsets(&mut self) {
+		//struct fragment {
+		//	pub Key: String,
+		//	pub val: *const SectionFragment,
+		//};
+		//let mut fragments: Vec<fragment> = vec![];
+
+		let mut offset = 0;
+		let mut p2align = 0;
+		for (key, frag) in &mut self.Map {
+			offset = AlignTo(offset, 1 << frag.P2Align);
+			frag.Offset = offset as u32;
+			offset += key.len();
+			p2align = p2align.max(frag.P2Align);
+		}
+		self.Shdr.Size = AlignTo(offset, 1 << p2align);
+		self.Shdr.AddrAlign = 1 << p2align;
+	}
+
 }
 
 pub const PREFIXES: [&str; 13] = [
@@ -308,15 +286,6 @@ pub fn GetFlags(ctx: *mut Box<Context>) -> u32 {
 	}
 
 	flags
-}
-
-/// an ugly function to deal with rust's borrow rules...
-//pub fn ptr2ref(ctx_ptr: *mut Box<Context>) -> &'static mut Box<Context> {
-//	unsafe{&mut *ctx_ptr}
-//}
-
-pub fn ptr2ref<T>(ptr: *mut T) -> &'static mut T {
-	unsafe {&mut *ptr}
 }
 
 pub fn ptr2ref_dyn(ptr: *mut dyn Chunker) -> &'static mut dyn Chunker {

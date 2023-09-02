@@ -1,11 +1,9 @@
 //! module about file and io
 
-use super::elf::{Shdr, Ehdr, Sym, FileType};
-use super::elf::{SHDR_SIZE, EHDR_SIZE, checkMagic};
+use super::elf::{Sym, FileType};
+use super::elf::checkMagic;
 use super::archive::ReadArchiveMembers;
 use super::symbol::Symbol;
-use crate::utils::{Read, ReadSlice};
-
 use super::common::*;
 
 #[derive(Default, Clone,Debug)]
@@ -22,6 +20,8 @@ pub struct File {
 pub struct InputFile {
     pub File:           Rc<File>,
     pub ElfSections:    Vec<Shdr>,
+    /// for common symbols?
+	pub ElfSections2:   Vec<Shdr>,
     pub ElfSyms:        Vec<Rc<Sym>>,
     pub FirstGlobal:    usize,
     //pub Shstrtab:       Vec<u8>,

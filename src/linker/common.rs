@@ -7,6 +7,8 @@ pub use std::collections::BTreeMap;
 
 pub use super::objectfile::Objectfile;
 pub use super::context::Context;
+pub use super::chunker::Chunker;
+pub use super::elf::{EHDR_SIZE, SHDR_SIZE, PHDR_SIZE, Shdr, Ehdr, Phdr};
 pub use elf::abi;
 
 pub use crate::utils::*;

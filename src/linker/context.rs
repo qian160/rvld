@@ -1,9 +1,8 @@
 //! useful informations collected and will be used during linking
 use super::common::*;
 use super::elf::{MachineType, Sym};
-use super::sections::MergedSection;
 use super::symbol::Symbol;
-use super::output::{OutputEhdr, Chunker, OutputShdr, OutputSection};
+use super::output::{OutputEhdr, OutputShdr, OutputSection, MergedSection};
 
 #[derive(Default)]
 pub struct ContextArgs {

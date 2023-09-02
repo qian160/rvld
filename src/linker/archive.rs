@@ -43,11 +43,12 @@ impl ArHdr {
 		if self.Name.starts_with(b"/") {
 			let start = atoi(&self.Name[1..]);
 			let end = start + strtab.windows(2).position(|w| w ==  b"/\n").unwrap();
-			return String::from_utf8(strtab[start..end].into()).unwrap().into();
+			//return String::from_utf8(strtab[start..end].into()).unwrap().into();
+			return unsafe { String::from_utf8_unchecked(strtab[start..end].into())};
 		}
 		// short filename
 		let end = self.Name.iter().position( |&x| x == b'/').unwrap();
-		String::from_utf8(self.Name[..end].into()).unwrap().into()
+		unsafe { String::from_utf8_unchecked(self.Name[..end].into()) }
 	}
 }
 

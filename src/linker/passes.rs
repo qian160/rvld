@@ -1,6 +1,6 @@
 use super::common::*;
 use super::elf::IMAGE_BASE;
-use super::output::{OutputEhdr, OutputShdr, Chunker, ptr2ref_dyn};
+use super::output::{OutputEhdr, OutputShdr, ptr2ref_dyn};
 use super::symbol::Symbol;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
@@ -16,7 +16,32 @@ pub fn ResolveSymbols(ctx: &mut Context) {
         }
     }
     ctx.Objs.retain(|obj| {obj.borrow().IsAlive()});
-}   
+}
+
+// Common symbols are used by C's tantative definitions. Tentative
+// definition is an obscure C feature which allows users to omit `extern`
+// from global variable declarations in a header file. For example, if you
+// have a tentative definition `int foo;` in a header which is included
+// into multiple translation units, `foo` will be included into multiple
+// object files, but it won't cause the duplicate symbol error. Instead,
+// the linker will merge them into a single instance of `foo`.
+//
+// If a header file contains a tentative definition `int foo;` and one of
+// a C file contains a definition with initial value such as `int foo = 5;`,
+// then the "real" definition wins. The symbol for the tentative definition
+// will be resolved to the real definition. If there is no "real"
+// definition, the tentative definition gets the default initial value 0.
+//
+// Tentative definitions are represented as "common symbols" in an object
+// file. In this function, we allocate spaces in .common or .tls_common
+// for remaining common symbols that were not resolved to usual defined
+// symbols in previous passes.
+pub fn ConvertCommonSymbols(ctx: &mut Context) {
+    for i in 0..ctx.Objs.len() {
+        let p = std::ptr::addr_of_mut!(*ctx);
+        Objectfile::ConvertCommonSymbols(&ctx.Objs[i], p);
+    }
+}
 
 pub fn MarkLiveObjects(ctx: &mut Context) {
     let mut roots = vec![];
@@ -29,7 +54,7 @@ pub fn MarkLiveObjects(ctx: &mut Context) {
     assert!(roots.len() > 0);
 
     while roots.len() > 0 {
-        let file = roots[0].clone();
+        let file: Rc<RefCell<Objectfile>> = roots[0].clone();
         if file.borrow().IsAlive() == false {
             continue;
         }
@@ -139,10 +164,17 @@ pub fn BinSections(ctx: &mut Context) {
 
 //pub fn CollectOutputSections(ctx: &mut Context) -> Vec<Rc<RefCell<dyn Chunker>>>{
 pub fn CollectOutputSections(ctx: &mut Context) -> Vec<*mut dyn Chunker>{
-    // in fact dyn chunker = outputsections here
+    // outputsections
     let mut osecs: Vec<*mut dyn Chunker> = vec![];
     for osec in &mut ctx.OutputSections {
         if osec.borrow().Members.len() > 0 {
+            let osec_ptr = unsafe {&mut *osec.as_ptr()};
+            osecs.push(osec_ptr);
+        }
+    }
+
+    for osec in &ctx.MergedSections {
+        if osec.borrow().Shdr.Size > 0 {
             let osec_ptr = unsafe {&mut *osec.as_ptr()};
             osecs.push(osec_ptr);
         }
@@ -214,4 +246,10 @@ pub fn SortOutputSections(ctx: &mut Context) {
 pub fn isTbss(chunk: &mut dyn Chunker) -> bool {
     let shdr = chunk.GetShdr();
     shdr.Type == abi::SHT_NOBITS && shdr.Flags & abi::SHF_TLS as u64 != 0
+}
+
+pub fn ComputeMergedSectionSizes(ctx: &mut Context) {
+    for osec in &ctx.MergedSections {
+        osec.borrow_mut().AssignOffsets();
+    }
 }
