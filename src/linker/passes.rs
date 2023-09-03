@@ -1,6 +1,6 @@
 use super::common::*;
 use super::elf::IMAGE_BASE;
-use super::output::{OutputEhdr, OutputShdr, ptr2ref_dyn};
+use super::output::{OutputEhdr, OutputShdr, ptr2ref_dyn, OutputPhdr};
 use super::symbol::Symbol;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
@@ -89,10 +89,12 @@ pub fn CreateInternalFile(ctx: &mut Context) {
 // mark
 pub fn CreateSyntheticSections(ctx: &mut Context) {
     ctx.Ehdr = OutputEhdr::new();
+    ctx.Phdr = OutputPhdr::new();
     ctx.Shdr = OutputShdr::new();
 
     // ehdr must be the first chunk to be written
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Ehdr));
+    ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Phdr));
     // the first section header is always empty.(according to the abi)
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Shdr));
 }
@@ -106,7 +108,7 @@ pub fn SetOutputSectionOffsets(ctx: &mut Context) -> usize {
             continue;
         }
 
-        addr = AlignTo(addr, c.GetShdr().AddrAlign);
+        addr = AlignTo(addr, c.GetShdr().AddrAlign as usize);
         c.GetShdr().Addr = addr as u64;
 
         if !isTbss(c) {
@@ -134,7 +136,7 @@ pub fn SetOutputSectionOffsets(ctx: &mut Context) -> usize {
     // non-alloc sections 
     while i < ctx.Chunks.len() {
         let shdr = ptr2ref_dyn(ctx.Chunks[i]).GetShdr();
-        fileoff = AlignTo(fileoff, shdr.AddrAlign);
+        fileoff = AlignTo(fileoff, shdr.AddrAlign as usize);
         shdr.Offset = fileoff;
         fileoff += shdr.Size;
         i += 1;
@@ -192,7 +194,6 @@ pub fn ComputeSectionSizes(ctx: &mut Context) {
             offset += isec.borrow().ShSize;
             p2align = p2align.max(isec.borrow().P2Align);
         }
-        //debug!("{offset}");
         osec.borrow_mut().Shdr.Size = offset;
         osec.borrow_mut().Shdr.AddrAlign = 1 << p2align;
     }
@@ -210,12 +211,16 @@ pub fn SortOutputSections(ctx: &mut Context) {
         let flags = c.GetShdr().Flags;
         let eptr = std::ptr::addr_of!(*ctx.Ehdr);
         let sptr = std::ptr::addr_of!(*ctx.Shdr);
+        let pptr = std::ptr::addr_of!(*ctx.Phdr);
 
         if flags & abi::SHF_ALLOC as u64 == 0 {
             return u32::MAX - 1;
         }
         if std::ptr::eq(std::ptr::addr_of!(*c) as *const OutputShdr, sptr) {
             return u32::MAX;
+        }
+        if std::ptr::eq(std::ptr::addr_of!(*c) as *const OutputPhdr, pptr) {
+            return 1;
         }
         if std::ptr::eq(std::ptr::addr_of!(*c) as *const OutputEhdr, eptr) {
             return 0;

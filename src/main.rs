@@ -12,7 +12,7 @@ use linker::file::File;
 use std::cell::RefCell;
 use std::io::Write;
 
-use crate::linker::elf::{MachineType, checkMagic};
+use crate::linker::elf::{MachineType, checkMagic, Ehdr};
 use crate::linker::passes;
 
 fn main() {
@@ -27,7 +27,7 @@ fn main() {
             if filename.starts_with("-") {
                 continue;
             }
-            let file = File::new(&filename, None, None);
+            let file = File::new(&filename, vec![], None);
             ctx.Args.Emulation = GetMachineType(&file);
             if ctx.Args.Emulation != MachineType::MachineTypeNone {
                 break;
@@ -48,8 +48,6 @@ fn main() {
     passes::BinSections(&mut ctx);
     let chunks = passes::CollectOutputSections(&mut ctx);
     ctx.Chunks.extend(chunks);
-
-    debug!("#chunks = {}", ctx.Chunks.len());
 
     passes::ComputeSectionSizes(&mut ctx);
     passes::SortOutputSections(&mut ctx);
@@ -78,6 +76,8 @@ fn main() {
     }
 
     f.write_all(&ctx.Buf).unwrap();
+    let ehdr = unsafe { (ctx.Buf[0..64].as_ptr() as *const Ehdr).read() };
+    debug!("\n{:?}", ehdr);
     assert!(checkMagic(&ctx.Buf));
 }
 

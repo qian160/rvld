@@ -20,12 +20,10 @@ pub struct File {
 pub struct InputFile {
     pub File:           Rc<File>,
     pub ElfSections:    Vec<Shdr>,
-    /// for common symbols?
+    /// for common symbols
 	pub ElfSections2:   Vec<Shdr>,
     pub ElfSyms:        Vec<Rc<Sym>>,
     pub FirstGlobal:    usize,
-    //pub Shstrtab:       Vec<u8>,
-    //pub SymbolStrTab:   Vec<u8>,
     pub Shstrtab:       ByteSequence,
     pub SymbolStrTab:   ByteSequence,
     pub IsAlive:        bool,
@@ -43,12 +41,13 @@ impl Deref for InputFile {
 }
 
 impl File {
-    pub fn new(name: &str, contents: Option<Vec<u8>>, parent: Option<Rc<File>>) -> Rc<Self> {
-        let Contents = if contents.is_none() {
+    /// the contents is optional. the key is to avoid copy
+    pub fn new(name: &str, contents: Vec<u8>, parent: Option<Rc<File>>) -> Rc<Self> {
+        let Contents = if contents.len() == 0 {
             std::fs::read(name).expect(&format!("{} read failed", name))
         }
         else {
-            contents.unwrap()
+            contents
         };
         let ft: FileType;
         if Contents.len() == 0 {
@@ -150,9 +149,6 @@ impl InputFile {
         self.GetBytesFromShdr(&self.ElfSections[idx])
     }
 
-    // symtab is a special section, whose contents inside are
-    // organized in the data structure called `Sym`
-    // it needs to work together with strtab or shstrtab
     pub fn FillUpElfSyms(&mut self, symtab: &Shdr) {
         let bytes = self.GetBytesFromShdr(symtab);
         let syms = ReadSlice::<Sym>(&bytes);
@@ -171,21 +167,16 @@ pub fn ReadInputFiles(ctx: &mut Context, remaining: Vec<String>) {
             ReadFile(ctx, FindLibrary(ctx, arg).unwrap());
         }
         else {
-            ReadFile(ctx, File::new(&arg, None, None));
+            ReadFile(ctx, File::new(&arg, vec![], None));
         }
     }
 }
 
 pub fn ReadFile(ctx: &mut Context, file: Rc<File>) {
-//    let start = std::time::Instant::now();
     match file.Type {
-        // at first we assume all the objects in the archive will not be used by the 
-        // program. however later we will find what is actually needed and correct it
         FileType::FileTypeObject => {
             let obj = Objectfile::new(ctx, file, true);
             ctx.Objs.push(obj);
-//            let e = start.elapsed();
-//            info!("read objfile finished: {:?}", e);
         },
         FileType::FileTypeArchive => {
             for child in ReadArchiveMembers(file) {
@@ -193,8 +184,6 @@ pub fn ReadFile(ctx: &mut Context, file: Rc<File>) {
                 let obj = Objectfile::new(ctx, child, false);
                 ctx.Objs.push(obj);
             }
-//            let e = start.elapsed();
-//            warn!("read archive finished: {:?}", e);
         },
         _ => {
             error!("unknown file type!");
@@ -205,7 +194,7 @@ pub fn ReadFile(ctx: &mut Context, file: Rc<File>) {
 pub fn OpenLibrary(path: &str) -> Option<Rc<File>> {
 	match std::fs::read(path) {
         Ok(Contents) =>
-            Some(File::new(path, Some(Contents), None)),
+            Some(File::new(path, Contents, None)),
         Err(_) => None
 	}
 }

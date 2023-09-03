@@ -34,7 +34,7 @@ pub struct MergeableSection {
 	pub P2Align:	u8,
 	pub Strs:		Vec<String>,
 	pub FragOffset:	Vec<u32>,
-	pub Fragments:	Vec<SectionFragment>,
+	pub Fragments:	Vec<Rc<RefCell<SectionFragment>>>,
 }
 
 #[derive(Default,Debug, Clone)]
@@ -105,7 +105,7 @@ impl MergeableSection {
 		Box::new(MergeableSection{..Default::default()})
 	}
 
-	pub fn GetFragment(&self, offset: u32) -> (Option<Box<SectionFragment>>, u32) {
+	pub fn GetFragment(&self, offset: u32) -> (Option<Rc<RefCell<SectionFragment>>>, u32) {
 		let pos = self.FragOffset.iter().position(|x| offset < *x ).unwrap_or(self.FragOffset.len());
 
 		if pos == 0 {
@@ -114,21 +114,19 @@ impl MergeableSection {
 
 		let idx = pos - 1;
 		return (
-			Some(Box::new(self.Fragments[idx].clone())),
+			Some(self.Fragments[idx].clone()),
 			offset - self.FragOffset[idx]
 		);
 	}
 }
 
 impl SectionFragment {
-	pub fn new(m: Rc<RefCell<MergedSection>>) -> Box<Self>{
-		Box::new(
-			Self {
-				OutputSection: m.clone(),
-				Offset: u32::MAX,
-				..Default::default()
-			}
-		)
+	pub fn new(m: Rc<RefCell<MergedSection>>) -> Rc<RefCell<Self>>{
+		Self {
+			OutputSection: m.clone(),
+			Offset: u32::MAX,
+			..Default::default()
+		}.ToRcRefcell()
 	}
 }
 

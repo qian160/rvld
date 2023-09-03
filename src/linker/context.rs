@@ -2,7 +2,7 @@
 use super::common::*;
 use super::elf::{MachineType, Sym};
 use super::symbol::Symbol;
-use super::output::{OutputEhdr, OutputShdr, OutputSection, MergedSection};
+use super::output::{OutputEhdr, OutputShdr, OutputSection, MergedSection, OutputPhdr};
 
 #[derive(Default)]
 pub struct ContextArgs {
@@ -20,10 +20,11 @@ pub struct Context {
     pub Buf:            Vec<u8>,
     pub MergedSections: Vec<Rc<RefCell<MergedSection>>>,
     // for output use
-    //pub Ehdr:           Rc<RefCell<OutputEhdr>>,
-    //pub Shdr:           Rc<RefCell<OutputShdr>>,
     pub Ehdr:           Box<OutputEhdr>,
     pub Shdr:           Box<OutputShdr>,
+    pub Phdr:           Box<OutputPhdr>,
+    pub TpAddr:         u64,    // thread local pointer
+
     pub OutputSections: Vec<Rc<RefCell<OutputSection>>>,
     /// each chunk in this vector will finally be written into the target file.
     /// and these chunks have various types, including `chunk`, `outputshdr`, `outputehdr`, `outputsection`, 
@@ -39,7 +40,7 @@ pub struct Context {
     pub Chunks:         Vec<*mut dyn Chunker>,
     // before generating outputfile, we will write the output data
     // to this internalobj. so it works as a buffer.
-    // this internalobj also exits in ctx.objs, so use rc
+    // this internalobj will also exist in ctx.objs
     pub InternalObj:    Rc<RefCell<Objectfile>>,
     pub InternalEsyms:  Vec<Rc<Sym>>,
 }

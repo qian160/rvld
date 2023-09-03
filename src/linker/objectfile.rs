@@ -257,7 +257,7 @@ impl Objectfile {
 
                 shdr.Type = abi::SHT_NOBITS;
                 shdr.Size = obj.ElfSyms[i].Size as usize;
-                shdr.AddrAlign = obj.ElfSyms[i].Val as usize;
+                shdr.AddrAlign = obj.ElfSyms[i].Val;
 
                 let idx = obj.ElfSections.len() + obj.ElfSections2.len() - 1;
                 drop(esym);
@@ -320,7 +320,7 @@ impl Objectfile {
                 ms.Fragments = Vec::with_capacity(len);
                 for i in 0..len {
                     ms.Fragments.push(
-                        *MergedSection::Insert(ms.Parent.clone(), ms.Strs[i].clone(), ms.P2Align)
+                        MergedSection::Insert(ms.Parent.clone(), ms.Strs[i].clone(), ms.P2Align).clone()
                     );
                 }
             }

@@ -10,7 +10,7 @@ pub struct  Symbol {
 	pub Name:				String,
 	pub Value:				u64,
 	pub SymIdx:				usize,
-	pub SectionFragment:	Option<Box<SectionFragment>>,
+	pub SectionFragment:	Option<Rc<RefCell<SectionFragment>>>,
 }
 
 impl Symbol {
@@ -26,7 +26,7 @@ impl Symbol {
 		self.SectionFragment = None;
 	}
 
-	pub fn SetSectionFragment(&mut self, frag: Option<Box<SectionFragment>>) {
+	pub fn SetSectionFragment(&mut self, frag: Option<Rc<RefCell<SectionFragment>>>) {
 		self.InputSection = None;
 		self.SectionFragment = frag;
 	}

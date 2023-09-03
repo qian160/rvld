@@ -25,7 +25,43 @@ impl ByteSequence {
 	}
 }
 
+/// an example usage:
+/// 
+/// let foo = Rc::new(RefCell::new(114514));
+/// 
+/// let p = Ptr::new(ptr2ref(foo.as_ptr()));
+/// 
+/// debug!("{}", p.is_null());  // false
+/// 
+/// debug!("{}", p.get());      // 114514
+/// 
+/// *p.get() = 1;
+/// 
+/// debug!("{}", a.get());      // 1
+/*
+pub struct Ptr<T> {
+    _Contents:   *mut T,
+}
 
+impl <T> Default for Ptr<T> {
+    fn default() -> Self {
+        Ptr { _Contents: std::ptr::null_mut() }
+    }
+}
+
+impl <T> Ptr<T> {
+    /// note: can not point to local variables
+    pub fn new(c: &mut T) -> Self {
+        Self { _Contents: c }
+    }
+    pub fn is_null(&self) -> bool {
+        self._Contents.is_null()
+    }
+    pub fn get(&self) -> &mut T{
+        unsafe { &mut *self._Contents }
+    }
+}
+ */
 pub fn Read<T: Sized>(data: &[u8]) -> T {
     let sz = size_of::<T>();
     if data.len() < sz {
@@ -73,10 +109,17 @@ pub fn atoi(s: &[u8]) -> usize {
 	s[0..end].parse::<usize>().unwrap()
 }
 
+pub fn vec2slice<T>(v: &Vec<T>) -> &[u8] {
+    let len = v.len() * std::mem::size_of::<T>();
+    let ptr = v.as_ptr() as *const u8;
+
+    unsafe {std::slice::from_raw_parts(ptr, len)}
+}
+
 pub fn AlignTo(val: usize, align: usize) -> usize {
     match align {
         0 => val,
-        _ => (val + align - 1) &! (align - 1)
+        _ => (val + align - 1) & !(align - 1)
     }
 }
 

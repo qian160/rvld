@@ -43,7 +43,6 @@ impl ArHdr {
 		if self.Name.starts_with(b"/") {
 			let start = atoi(&self.Name[1..]);
 			let end = start + strtab.windows(2).position(|w| w ==  b"/\n").unwrap();
-			//return String::from_utf8(strtab[start..end].into()).unwrap().into();
 			return unsafe { String::from_utf8_unchecked(strtab[start..end].into())};
 		}
 		// short filename
@@ -82,7 +81,7 @@ pub fn ReadArchiveMembers(file: Rc<File>) -> Vec<Rc<File>>{
 
 		let f = File::new(
 			&hdr.ReadName(strTab.GetSlice()),
-			Some(contents.into()),
+			contents.into(),
 			Some(file.clone())
 		);
 		files.push(f);

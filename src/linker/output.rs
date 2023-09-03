@@ -1,4 +1,6 @@
 use elf::abi::EF_RISCV_RVC;
+use crate::linker::elf::PAGESIZE;
+
 use super::common::*;
 use super::inputsections::{InputSection, SectionFragment};
 
@@ -21,6 +23,13 @@ pub struct OutputShdr {
 	pub Chunk: Chunk
 }
 
+
+#[derive(Default, Clone)]
+pub struct OutputPhdr {
+	pub Chunk: 	Chunk,
+	pub Phdrs:	Vec<Phdr>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct OutputSection {
 	pub Chunk:		Chunk,
@@ -33,7 +42,7 @@ pub struct OutputSection {
 pub struct MergedSection {
 	pub Chunk:	Chunk,
 	/// note: key is not always strings
-	pub Map:	BTreeMap<String, Box<SectionFragment>>,
+	pub Map:	BTreeMap<String, Rc<RefCell<SectionFragment>>>,
 }
 
 impl Deref for MergedSection {
@@ -70,6 +79,19 @@ impl Deref for OutputShdr{
 }
 
 impl DerefMut for OutputShdr {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.Chunk
+	}
+}
+
+impl Deref for OutputPhdr {
+	type Target = Chunk;
+	fn deref(&self) -> &Self::Target {
+		&self.Chunk
+	}
+}
+
+impl DerefMut for OutputPhdr {
 	fn deref_mut(&mut self) -> &mut Self::Target {
 		&mut self.Chunk
 	}
@@ -133,6 +155,19 @@ impl OutputShdr {
 	}
 }
 
+impl OutputPhdr {
+	pub fn new() -> Box<Self> {
+		let mut o = Self {
+			Chunk: Chunk::new(),
+			..Default::default()
+		};
+		o.Shdr.Flags = abi::SHF_ALLOC as u64;
+		o.Shdr.AddrAlign = 8;
+
+		Box::new(o)
+	}
+}
+
 impl MergedSection {
 	pub fn new(name: &str, flags: u64, ty: u32) -> Rc<RefCell<MergedSection>> {
 		let mut m = MergedSection {
@@ -171,38 +206,60 @@ impl MergedSection {
 		}
 	}
 
-	pub fn Insert(m: Rc<RefCell<Self>>, key: String, p2align: u8) -> Box<SectionFragment> {
+	pub fn Insert(m: Rc<RefCell<Self>>, key: String, p2align: u8) -> Rc<RefCell<SectionFragment>> {
 		let mut ms = m.borrow_mut();
-		let exist = ms.Map.get(&key).is_some();
 
-		let mut frag;
-		if !exist {
-			frag = SectionFragment::new(m.clone());
-			ms.Map.insert(key, frag.clone());
-		}
-		else {
-			frag = ms.Map.get(&key).unwrap().clone();
-		}
+		let frag = match ms.Map.get(&key) {
+			Some(f) => f,
+			None => {
+				ms.Map.insert(key.clone(), SectionFragment::new(m.clone()));
+				ms.Map.get(&key).unwrap()
+			}
+		};
 
-		frag.P2Align = frag.P2Align.max(p2align);
+		let p2align_old = frag.borrow().P2Align;
+		frag.borrow_mut().P2Align = p2align_old.max(p2align);
 		frag.clone()
 	}
-
+	// sort?
 	pub fn AssignOffsets(&mut self) {
-		//struct fragment {
-		//	pub Key: String,
-		//	pub val: *const SectionFragment,
-		//};
-		//let mut fragments: Vec<fragment> = vec![];
+		struct Fragment<'a> {
+			pub Key: String,
+			pub val: &'a mut SectionFragment,
+		}
+		let mut fragments: Vec<Fragment> = vec![];
+		for (key, frag) in &mut self.Map {
+			let ptr = ptr2ref(frag.as_ptr());
+			fragments.push(Fragment { Key: key.clone(), val: ptr })
+		}
+
+		fragments.sort_by(|x, y| {
+			if x.val.P2Align != y.val.P2Align {
+				return x.val.P2Align.cmp(&y.val.P2Align);
+			}
+			if x.Key.len() != y.Key.len() {
+				return x.Key.len().cmp(&y.Key.len());
+			}
+			return x.Key.cmp(&y.Key);
+		});
 
 		let mut offset = 0;
 		let mut p2align = 0;
-		for (key, frag) in &mut self.Map {
-			offset = AlignTo(offset, 1 << frag.P2Align);
-			frag.Offset = offset as u32;
-			offset += key.len();
-			p2align = p2align.max(frag.P2Align);
+		for mut frag in fragments {
+			offset = AlignTo(offset, 1 << frag.val.P2Align);
+			frag.val.Offset = offset as u32;
+			offset += frag.Key.len();
+			p2align = p2align.max(frag.val.P2Align);
 		}
+
+//		let mut offset = 0;
+//		let mut p2align = 0;
+//		for (key, frag) in &mut self.Map {
+//			offset = AlignTo(offset, 1 << frag.P2Align);
+//			frag.Offset = offset as u32;
+//			offset += key.len();
+//			p2align = p2align.max(frag.P2Align);
+//		}
 		self.Shdr.Size = AlignTo(offset, 1 << p2align);
 		self.Shdr.AddrAlign = 1 << p2align;
 	}
@@ -290,4 +347,137 @@ pub fn GetFlags(ctx: *mut Box<Context>) -> u32 {
 
 pub fn ptr2ref_dyn(ptr: *mut dyn Chunker) -> &'static mut dyn Chunker {
 	unsafe {&mut *ptr}
+}
+
+pub fn createPhdr(ctx: &mut Context) -> Vec<Phdr> {
+	let vec = RefCell::new(vec![]);
+
+	let define = |Type: u32, Flags: u32, minAlign: u64, chunk: &mut dyn Chunker| {
+		let shdr = chunk.GetShdr();
+		let mut phdr = Phdr{
+			Type, Flags,
+			Align: minAlign.max(shdr.AddrAlign),
+			Offset:  shdr.Offset as u64,
+			VAddr:   shdr.Addr,
+			PAddr:   shdr.Addr,
+			MemSize: shdr.Size as u64,
+			..Default::default()
+		};
+
+		phdr.FileSize = match shdr.Type {
+			abi::SHT_NOBITS => 0,
+			_ => shdr.Size as u64,
+		};
+		vec.borrow_mut().push(phdr);
+	};
+
+	let push = |chunk: &mut dyn Chunker| {
+		let shdr = chunk.GetShdr();
+		let len = vec.borrow().len();
+		let mut phdr = &mut vec.borrow_mut()[len - 1];
+		phdr.Align = phdr.Align.max(shdr.AddrAlign);
+
+		if shdr.Type != abi::SHT_NOBITS {
+			phdr.FileSize = shdr.Addr + shdr.Size as u64 - phdr.VAddr;
+		}
+
+		phdr.MemSize = shdr.Addr + shdr.Size as u64 - phdr.VAddr;
+	};
+
+	// the 1st phdr should point to the phdr table itself
+	define(abi::PT_PHDR, abi::PF_R, 8, &mut *ctx.Phdr);
+
+	let end = ctx.Chunks.len();
+	let mut i = 0;
+	while i < end {
+		let first = ptr2ref_dyn(ctx.Chunks[i]);
+		i += 1;
+		if !first.isNote() {
+			continue;
+		}
+
+		let flags = first.toPhdrFlags();
+		let alignment = first.GetShdr().AddrAlign;
+		define(abi::PT_NOTE, flags, alignment, first);
+		while i < end {
+			let chunk = ptr2ref_dyn(ctx.Chunks[i]);
+			if !chunk.isNote() || !chunk.toPhdrFlags() == flags {
+				break;
+			}
+
+			push(chunk);
+			i += 1;
+		}
+	}
+
+	// bss
+	{
+		let mut chunks = ctx.Chunks.clone();
+		chunks.retain(|c| {
+			!ptr2ref_dyn(*c).isBss()
+		});
+
+		let end = chunks.len();
+		let mut i = 0;
+		while i < end {
+			let first = ptr2ref_dyn(chunks[i]);
+			i += 1;
+
+			if first.GetShdr().Flags & abi::SHF_ALLOC as u64 == 0 {
+				break;
+			}
+
+			let flags = first.toPhdrFlags();
+			define(abi::PT_LOAD, flags, PAGESIZE, first);
+
+			if !first.isBss() {
+				while i < end {
+					let c = ptr2ref_dyn(chunks[i]);
+					if !(c.toPhdrFlags() == flags) || c.isBss() {
+						break;
+					}
+					push(c);
+					i += 1;
+				}
+			}
+
+			while i < end {
+				let c = ptr2ref_dyn(chunks[i]);
+				if !c.isBss() || !(c.toPhdrFlags() == flags) {
+					break;
+				}
+				push(c);
+				i += 1;
+			}
+		}
+	}
+
+	let mut i = 0;
+	while i < ctx.Chunks.len() {
+		let c = ptr2ref_dyn(ctx.Chunks[i]);
+		if !c.isTls() {
+			i += 1;
+			continue;
+		}
+
+		define(abi::PT_TLS, c.toPhdrFlags(), 1, c);
+		i += 1;
+
+		while i < ctx.Chunks.len() {
+			let c = ptr2ref_dyn(ctx.Chunks[i]);
+			if !c.isTls() {
+				break;
+			}
+
+			push(c);
+			i += 1;
+		}
+
+		let len = vec.borrow().len();
+		let phdr = &vec.borrow()[len-1];
+		ctx.TpAddr = phdr.VAddr;
+		i += 1;
+	}
+
+	vec.into_inner()
 }

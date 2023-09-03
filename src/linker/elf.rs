@@ -4,8 +4,8 @@ pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
 pub const PHDR_SIZE: usize = core::mem::size_of::<Phdr>();
 
 pub const IMAGE_BASE: usize = 0x200000;
-
 pub const MAGIC: &[u8] = b"\x7fELF";
+pub const PAGESIZE: u64 = 4096;
 
 pub fn checkMagic(s: &[u8]) -> bool {
     s.starts_with(MAGIC)
@@ -94,12 +94,13 @@ pub struct Shdr{
     /// Defined by section type
 	pub Info:       u32,
     /// address alignment
-	pub AddrAlign:  usize,
+	pub AddrAlign:  u64,
     /// size of an entry if section data is an array of entries
 	pub EntSize:    usize,
 }
 
 #[derive(Debug, Default, Clone)]
+#[repr(C)]
 pub struct Phdr {
 	/// Program segment type
     pub Type:		u32,
