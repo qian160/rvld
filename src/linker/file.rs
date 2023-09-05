@@ -90,7 +90,7 @@ impl InputFile {
 
         let mut f = InputFile{
             File: file,
-            ..Default::default()
+            ..default()
         };
 
         let ehdr: Ehdr = Read::<Ehdr>(&f.Contents);

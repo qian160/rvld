@@ -1,7 +1,7 @@
 use super::common::*;
-use super::elf::IMAGE_BASE;
+use super::elf::{IMAGE_BASE, NEEDS_GOT_TP};
+use super::gotsection::GotSection;
 use super::output::{OutputEhdr, OutputShdr, ptr2ref_dyn, OutputPhdr};
-use super::symbol::Symbol;
 
 pub fn ResolveSymbols(ctx: &mut Context) {
     for file in ctx.Objs.iter() {
@@ -70,36 +70,21 @@ pub fn RegisterSectionPieces(ctx: &mut Context) {
 }
 
 // mark
-pub fn CreateInternalFile(ctx: &mut Context) {
-    let mut obj = Objectfile{
-        ..Default::default()
-    };
-
-    obj.Symbols.insert(0, Symbol::new(""));
-    obj.FirstGlobal = 1;
-    obj.IsAlive = true;
-    obj.ElfSyms = ctx.InternalEsyms.clone();
-
-    let o = obj.ToRcRefcell();
-    ctx.InternalObj = o.clone();
-    // ?
-    ctx.Objs.push(o);
-}
-
-// mark
 pub fn CreateSyntheticSections(ctx: &mut Context) {
     ctx.Ehdr = OutputEhdr::new();
     ctx.Phdr = OutputPhdr::new();
     ctx.Shdr = OutputShdr::new();
+    ctx.Got = GotSection::new();
 
     // ehdr must be the first chunk to be written
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Ehdr));
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Phdr));
     // the first section header is always empty.(according to the abi)
     ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Shdr));
+    ctx.Chunks.push(std::ptr::addr_of_mut!(*ctx.Got));
 }
 
-pub fn SetOutputSectionOffsets(ctx: &mut Context) -> usize {
+pub fn SetOutputSectionOffsets(ctx: &mut Box<Context>) -> usize {
     let mut addr = IMAGE_BASE;
     // set up addr
     for c in &ctx.Chunks {
@@ -141,6 +126,9 @@ pub fn SetOutputSectionOffsets(ctx: &mut Context) -> usize {
         fileoff += shdr.Size;
         i += 1;
     }
+
+    let ctx_ptr = ctx as *mut _;
+    ctx.Phdr.UpdateShdr(ctx_ptr);
     fileoff
 }
 
@@ -177,7 +165,7 @@ pub fn CollectOutputSections(ctx: &mut Context) -> Vec<*mut dyn Chunker>{
 
     for osec in &ctx.MergedSections {
         if osec.borrow().Shdr.Size > 0 {
-            let osec_ptr = unsafe {&mut *osec.as_ptr()};
+            let osec_ptr = osec.as_ptr();
             osecs.push(osec_ptr);
         }
     }
@@ -256,5 +244,22 @@ pub fn isTbss(chunk: &mut dyn Chunker) -> bool {
 pub fn ComputeMergedSectionSizes(ctx: &mut Context) {
     for osec in &ctx.MergedSections {
         osec.borrow_mut().AssignOffsets();
+    }
+}
+
+// mark
+pub fn ScanRelocations(ctx: &mut Context) {
+    ctx.Objs.iter().for_each(|f| f.borrow().ScanRelocations());
+//    let syms = vec![];
+
+    for file in ctx.Objs.iter() {
+        for (_, sym) in file.borrow().Symbols.iter() {
+            if let Some(f) = &sym.borrow().File {
+                if Rc::ptr_eq(f, file) && sym.borrow().Flags & NEEDS_GOT_TP != 0 {
+                    ctx.Got.AddGotTpSymbol(sym.clone());
+                    sym.borrow_mut().Flags = 0;
+                }
+            }
+        }
     }
 }

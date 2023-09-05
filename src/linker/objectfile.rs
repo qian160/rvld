@@ -4,7 +4,7 @@ use super::file::{InputFile, File};
 use super::elf::{CheckFileCompatibility, Sym, ElfGetName};
 use super::inputsections::{InputSection, MergeableSection, SplitSection};
 use super::symbol::Symbol;
-use super::output::MergedSection;
+use super::mergedsection::MergedSection;
 
 #[derive(Debug)]
 pub struct Objectfile {
@@ -21,10 +21,10 @@ impl Default for Objectfile {
         Self { 
             hasCommon:  false,
             SymTabSec:  std::ptr::null(),
-            inputFile:  Default::default(),
-            Sections:   Default::default(),
-            SymtabShndxSec: Default::default(),
-            MergeableSections:  Default::default()
+            inputFile:  default(),
+            Sections:   default(),
+            SymtabShndxSec: default(),
+            MergeableSections:  default()
         }
     }
 }
@@ -48,7 +48,7 @@ impl Objectfile {
         CheckFileCompatibility(ctx, file.as_ref());
         let obj = Objectfile {
             inputFile: InputFile::new(file), 
-            ..Default::default()
+            ..default()
         }.ToRcRefcell();
         obj.borrow_mut().IsAlive = Alive;
         Objectfile::Parse(obj.clone(), ctx);
@@ -75,12 +75,13 @@ impl Objectfile {
         drop(o);
         Objectfile::InitSections(&obj, ctx);
         Objectfile::InitSymbols(&obj, ctx);
-        Objectfile::InitMergeableSections(obj.clone(), ctx);
+        Objectfile::InitMergeableSections(&obj, ctx);
+        obj.borrow_mut().SkipEhframeSections();
     }
 
     fn InitSections(obj: &Rc<RefCell<Self>>, ctx: &mut Context) {
         let len = obj.borrow().ElfSections.len();
-        obj.borrow_mut().Sections = vec![Default::default(); len];
+        obj.borrow_mut().Sections = vec![default(); len];
         for i in 0..len {
             let shdr = unsafe{
                 std::ptr::addr_of!(obj.borrow().ElfSections[i]).as_ref().unwrap()
@@ -103,13 +104,27 @@ impl Objectfile {
                 },
             }
         }
+
+        let len = obj.borrow().ElfSections.len();
+        for i in 0..len {
+            let shdr = unsafe {(&obj.borrow().ElfSections[i] as *const Shdr).read() };
+            if shdr.Type != abi::SHT_RELA {
+                continue;
+            }
+
+            assert!(shdr.Info < len as u32);
+            if let Some(target) = &obj.borrow_mut().Sections[shdr.Info as usize] {
+                assert!(target.borrow().RelsecIdx == usize::MAX);
+                target.borrow_mut().RelsecIdx = i;
+            }
+        }
     }
 
     // find out which sections are mergeable
-    fn InitMergeableSections(obj: Rc<RefCell<Self>>, ctx: &mut Context) {
+    fn InitMergeableSections(obj: &Rc<RefCell<Self>>, ctx: &mut Context) {
         let mut o = obj.borrow_mut();
         let len = o.Sections.len();
-        o.MergeableSections = vec![Default::default(); len];
+        o.MergeableSections = vec![default(); len];
         drop(o);
         for i in 0..len {
             let isec = obj.borrow().Sections[i].clone();
@@ -242,8 +257,8 @@ impl Objectfile {
                     continue;
                 }
 
-                obj.ElfSections2.push(Default::default());
-                let mut shdr = Shdr{..Default::default()};
+                obj.ElfSections2.push(default());
+                let mut shdr = Shdr{..default()};
                 let name: String;
 
                 (name, shdr.Flags) = match esym.Type() {
@@ -353,5 +368,27 @@ impl Objectfile {
 
     pub fn IsAlive(&self) -> bool {
         self.IsAlive
+    }
+
+    /// for exception handling. skip
+    pub fn SkipEhframeSections(&self) {
+        for isec in &self.Sections {
+            if let Some(isec) = isec {
+                if isec.borrow().IsAlive && isec.borrow().Name() == ".eh_frame" {
+                    isec.borrow_mut().IsAlive = false;
+                }
+            }
+        }
+    }
+
+    pub fn ScanRelocations(&self) {
+        for isec in &self.Sections {
+            if let Some(isec) = isec {
+                let mut isec = isec.borrow_mut();
+                if isec.IsAlive && isec.Shdr().Flags & abi::SHF_ALLOC as u64 != 0 {
+                    isec.ScanRelocations();
+                }
+            }
+        }
     }
 }

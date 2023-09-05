@@ -1,9 +1,11 @@
 use super::common::*;
 use super::elf::MAGIC;
+use super::gotsection::GotSection;
 use super::output::{
-    Chunk, MergedSection, OutputEhdr, OutputShdr, OutputSection, OutputPhdr,
+    Chunk, OutputEhdr, OutputShdr, OutputSection, OutputPhdr,
     GetEntryAddr, GetFlags, ptr2ref_dyn, createPhdr,
 };
+use super::mergedsection::MergedSection;
 
 pub trait Chunker {
 	fn GetShdr(&mut self) -> &mut Shdr;
@@ -54,7 +56,7 @@ impl Chunker for Chunk {
 
 impl Chunker for OutputEhdr {
 	fn CopyBuf(&mut self, ctx: *mut Box<Context>){
-		let mut ehdr = Ehdr{..Default::default()};
+		let mut ehdr = Ehdr{..default()};
 		ehdr.Ident[0..4].copy_from_slice(MAGIC);
 		ehdr.Ident[abi::EI_CLASS] = abi::ELFCLASS64;
 		ehdr.Ident[abi::EI_DATA] = abi::ELFDATA2LSB;
@@ -112,14 +114,14 @@ impl Chunker for OutputShdr {
 	fn CopyBuf(&mut self, ctx: *mut Box<Context>) {
 		let ctx = ptr2ref(ctx);
 		let base = &mut ctx.Buf[self.Shdr.Offset..];
-		Write::<Shdr>(base, &Shdr{..Default::default()});
+		Write::<Shdr>(base, Shdr{..default()});
 		// write output file's shdr
 		for c in &mut ctx.Chunks {
 			let c = ptr2ref_dyn(*c);
 			if c.GetShndx() > 0 {
 				Write::<Shdr>(
 					&mut base[c.GetShndx() * SHDR_SIZE..],
-						c.GetShdr()
+						unsafe {(c.GetShdr() as *const Shdr).read()}
 				);
 			}
 		}
@@ -147,12 +149,15 @@ impl Chunker for OutputSection {
 			return;
 		}
 
-		let ctx = ptr2ref(ctx);
-		let base = &mut ctx.Buf[self.Shdr.Offset..];
+        // double free? 
+        //let base = &mut unsafe {ctx.read()}.Buf[self.Shdr.Offset..];
+        assert!(!ctx.is_null());
+        let ctx_ptr = unsafe {&mut *ctx};
+        let base = &mut ctx_ptr.Buf[self.Shdr.Offset..];
 		for isec in &self.Members {
 			let mut isec = isec.borrow_mut();
 			let buf = &mut base[isec.Offset..];
-			isec.WriteTo(buf);
+			isec.WriteTo(ctx, buf);
 		}
 	}
 
@@ -177,4 +182,18 @@ impl Chunker for MergedSection {
 	fn GetShdr(&mut self) -> &mut Shdr { self.Chunk.GetShdr() }
 	fn GetShndx(&self) -> usize { self.Chunk.GetShndx() }
 
+}
+
+impl Chunker for GotSection {
+    fn CopyBuf(&mut self, ctx: *mut Box<Context>) {
+        let base = &mut ptr2ref(ctx).Buf[self.Shdr.Offset..];
+        for ent in self.GetEntries(ctx) {
+            Write(&mut base[ent.Idx * 8..], ent.Val);
+        }
+    }
+
+    fn UpdateShdr(&mut self, _ctx: *mut Box<Context>) {}
+    fn GetName(&self) -> &String { self.Chunk.GetName() }
+    fn GetShdr(&mut self) -> &mut Shdr { self.Chunk.GetShdr() }
+    fn GetShndx(&self) -> usize { self.Chunk.GetShndx() }
 }

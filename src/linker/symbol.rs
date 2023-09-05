@@ -11,12 +11,14 @@ pub struct  Symbol {
 	pub Value:				u64,
 	pub SymIdx:				usize,
 	pub SectionFragment:	Option<Rc<RefCell<SectionFragment>>>,
+	pub GotTpIdx:			usize,
+	pub Flags:				u32,
 }
 
 impl Symbol {
 	pub fn new(name: &str) -> Rc<RefCell<Self>> {
 			Rc::new(RefCell::new(
-			Symbol { Name: name.into(),  ..Default::default()}
+			Symbol { Name: name.into(),  ..default()}
 		))
 	}
 
@@ -65,8 +67,22 @@ impl Symbol {
 			},
 			None => {
 				error!("should not happen...");
-				Default::default()
+				default()
 			}
 		}
     }
+
+	pub fn GetAddr(&self) -> u64 {
+		if let Some(frag) = &self.SectionFragment {
+			return frag.borrow().GetAddr() + self.Value;
+		}
+		if let Some(isec) = &self.InputSection {
+			return unsafe {&*isec.as_ptr()}.GetAddr() + self.Value;
+		}
+		return self.Value;
+	}
+
+	pub fn GetGotTpAddr(&self, ctx: &Context) -> u64 {
+		ctx.Got.Shdr.Addr + (self.GotTpIdx as u64) * 8
+	}
 }

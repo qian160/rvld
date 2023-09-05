@@ -2,11 +2,13 @@
 pub const EHDR_SIZE: usize = core::mem::size_of::<Ehdr>();
 pub const SHDR_SIZE: usize = core::mem::size_of::<Shdr>();
 pub const PHDR_SIZE: usize = core::mem::size_of::<Phdr>();
+pub const RELA_SIZE: usize = core::mem::size_of::<Rela>();
 
 pub const IMAGE_BASE: usize = 0x200000;
 pub const MAGIC: &[u8] = b"\x7fELF";
 pub const PAGESIZE: u64 = 4096;
 
+pub const NEEDS_GOT_TP: u32 = 1;
 pub fn checkMagic(s: &[u8]) -> bool {
     s.starts_with(MAGIC)
 }
@@ -160,6 +162,15 @@ pub struct Sym {
     /// the object. This member holds 0 if the symbol has no size or an unknown
     /// size.
 	pub Size:       u64,
+}
+
+#[derive(Debug, Default, Clone)]
+#[repr(C)]
+pub struct Rela {
+    pub Offset: u64,
+    pub Type:   u32,
+    pub Sym:    u32,
+    pub Addend: u64,
 }
 
 #[derive(PartialEq, Default, Clone, Debug)]

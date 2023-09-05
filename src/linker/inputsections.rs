@@ -2,8 +2,10 @@
 
 use crate::linker::output::GetOutputSection;
 
-use super::elf::ElfGetName;
-use super::output::{OutputSection, MergedSection};
+use super::elf::{ElfGetName, Rela};
+use super::gotsection::{writeBtype, writeJtype, writeUtype, writeItype, writeStype, setRs1};
+use super::output::OutputSection;
+use  super::mergedsection::MergedSection;
 
 use super::common::*;
 
@@ -26,6 +28,8 @@ pub struct InputSection {
 	pub Offset:		usize,
 	/// multiple inputsecs could be mapped to the same outputsec
 	pub OutputSection:	Rc<RefCell<OutputSection>>,
+	pub RelsecIdx:	usize,
+	pub Rels:		Vec<Rela>
 }
 
 #[derive(Default,Debug, Clone)]
@@ -51,7 +55,10 @@ impl InputSection {
 			File: file,
 			Shndx: shndx,
 			IsAlive: true,
-			..Default::default()
+			Offset: usize::MAX,
+			RelsecIdx: usize::MAX,
+			ShSize: usize::MAX,
+			..default()
 		};
 
 		let shdr = s.Shdr().clone();
@@ -84,12 +91,47 @@ impl InputSection {
 	}
 
 	pub fn Name(&self) -> String {
-		ElfGetName(&self.File.borrow().Shstrtab.GetSlice(), self.Shdr().Name as usize)
+		let strtab = unsafe {&mut *self.File.as_ptr()}.Shstrtab.GetSlice();
+		ElfGetName(strtab, self.Shdr().Name as usize)
 	}
 
-	pub fn WriteTo(&mut self, buf: &mut [u8]) {
+	// bad code. temp
+	pub fn GetRels(&mut self) -> Vec<Rela> {
+		if self.RelsecIdx == usize::MAX || self.Rels.len() != 0 {
+			return self.Rels.clone();
+		}
+		let f = self.File.borrow();
+		let shdr = &f.ElfSections[self.RelsecIdx];
+		let bytes = f.GetBytesFromShdr(shdr);
+		self.Rels = ReadSlice::<Rela>(bytes);
+		self.Rels.clone()
+	}
+
+	pub fn GetAddr(&self) -> u64 {
+		self.OutputSection.borrow().Shdr.Addr + self.Offset as u64
+	}
+
+	pub fn ScanRelocations(&mut self) {
+		for rel in self.GetRels() {
+			let f = self.File.borrow();
+			let sym = f.Symbols.get(&(rel.Sym as usize)).unwrap();
+			if sym.borrow().File.is_none() {
+				continue;
+			}
+
+			if rel.Type == abi::R_RISCV_TLS_GOT_HI20 {
+				sym.borrow_mut().Flags |= super::elf::NEEDS_GOT_TP;
+			}
+		}
+	}
+
+	pub fn WriteTo(&mut self, ctx: *mut Box<Context>, buf: &mut [u8]) {
+		//let ctx = ptr2ref(ctx);
 		if self.Shdr().Type != abi::SHT_NOBITS && self.ShSize != 0 {
 			self.CopyContents(buf);
+			if self.Shdr().Flags & abi::SHF_ALLOC as u64 != 0 {
+				self.ApplyRelocAlloc(ctx, buf);
+			}
 		}
 	}
 
@@ -98,11 +140,110 @@ impl InputSection {
 		let slice = self.Contents.GetSlice();
 		buf[..self.Contents.1].copy_from_slice(slice);
 	}
+
+	fn ApplyRelocAlloc(&mut self, ctx: *mut Box<Context>, base: &mut [u8]) {
+		let rels = self.GetRels();
+		for rel in &rels {
+			if matches!(rel.Type, abi::R_RISCV_NONE | abi::R_RISCV_RELAX) {
+				continue;
+			}
+
+			let f = self.File.borrow();
+			let sym = f.Symbols.get(&(rel.Sym as usize)).unwrap().borrow();
+			let loc = &mut base[rel.Offset as usize ..];
+
+			if sym.File.is_none() {
+				continue;
+			}
+
+			let S = CheckedU64::from(sym.GetAddr());
+			let A = CheckedU64::from(rel.Addend);
+			let P = CheckedU64::from(self.GetAddr() + rel.Offset);
+
+			match rel.Type {
+				abi::R_RISCV_32 => Write(loc, (S+A).0 as u32),
+				abi::R_RISCV_64 => Write(loc, S+A),
+				abi::R_RISCV_BRANCH => writeBtype(loc,(S+A-P).0 as u32),
+				abi::R_RISCV_JAL => writeJtype(loc, (S+A-P).0 as u32),
+				abi::R_RISCV_CALL | abi::R_RISCV_CALL_PLT => {
+					let val = (S+A-P).0;
+					writeUtype(loc, val as u32);
+					writeItype(&mut loc[4..], val as u32);
+				},
+				abi::R_RISCV_TLS_GOT_HI20 => Write(loc, (CheckedU64(sym.GetGotTpAddr(unsafe{&**ctx})) +A-P).0 as u32),
+				abi::R_RISCV_PCREL_HI20 => Write(loc, (S+A-P).0 as u32),
+				abi::R_RISCV_HI20 => Write(loc, (S+A).0 as u32),
+				abi::R_RISCV_LO12_I | abi::R_RISCV_LO12_S => {
+					let val = S+A;
+					if rel.Type == abi::R_RISCV_LO12_I {
+						writeItype(loc, val.0 as u32);
+					}
+					else {
+						writeStype(loc, val.0 as u32)
+					}
+
+					if SignExtend(val.0, 11) == val.0 {
+						setRs1(loc, 0);
+					}
+				},
+				abi::R_RISCV_TPREL_LO12_I | abi::R_RISCV_TPREL_LO12_S => {
+					let val = S + A - CheckedU64(unsafe{&*ctx}.TpAddr);
+					if rel.Type == abi::R_RISCV_TPREL_LO12_I {
+						writeItype(loc, val.0 as u32);
+					}
+					else {
+						writeStype(loc, val.0 as u32);
+					}
+
+					if SignExtend(val.0, 11) == val.0 {
+						setRs1(loc, 4);
+					}
+				},
+				_ => {}
+			}
+		}
+
+		for rel in &rels {
+			match rel.Type {
+				abi::R_RISCV_PCREL_LO12_I | abi::R_RISCV_PCREL_LO12_S => {
+					let f = self.File.borrow();
+					let sym = f.Symbols.get(&(rel.Sym as usize)).unwrap().borrow();
+					assert!(sym.InputSection.is_some());
+					if let Some(isec) = &sym.InputSection {
+						assert!(std::ptr::eq(self, isec.as_ptr()));
+					}
+
+					let val = Read::<u32>(&base[sym.Value as usize..]);
+					let loc = &mut base[rel.Offset as usize..];
+					if rel.Type == abi::R_RISCV_PCREL_LO12_I {
+						writeItype(loc, val);
+					}
+					else {
+						writeStype(loc, val);
+					}
+				},
+				_ => {}
+			}
+		}
+
+		for rel in rels {
+			match rel.Type {
+				abi::R_RISCV_PCREL_HI20 | abi::R_RISCV_TLS_GOT_HI20 => {
+					let loc = &mut base[rel.Offset as usize..];
+					let val = Read::<u32>(loc);
+					Write(loc, val);
+					writeUtype(loc, val);
+				},
+				_ => {}
+			}
+		}
+		//todo!();
+	}
 }
 
 impl MergeableSection {
 	pub fn new() -> Box<Self> {
-		Box::new(MergeableSection{..Default::default()})
+		Box::new(MergeableSection{..default()})
 	}
 
 	pub fn GetFragment(&self, offset: u32) -> (Option<Rc<RefCell<SectionFragment>>>, u32) {
@@ -125,8 +266,11 @@ impl SectionFragment {
 		Self {
 			OutputSection: m.clone(),
 			Offset: u32::MAX,
-			..Default::default()
+			..default()
 		}.ToRcRefcell()
+	}
+	pub fn GetAddr(&self) -> u64 {
+		self.OutputSection.borrow().Shdr.Addr + self.Offset as u64
 	}
 }
 

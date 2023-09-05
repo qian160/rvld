@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::io::Write;
 
 use crate::linker::elf::{MachineType, checkMagic, Ehdr};
+use crate::linker::output::ptr2ref_dyn;
 use crate::linker::passes;
 
 fn main() {
@@ -39,8 +40,9 @@ fn main() {
     }
 
     linker::file::ReadInputFiles(&mut ctx, remaining);
-    passes::CreateInternalFile(&mut ctx);   debug!("before: #objs = {}", ctx.Objs.len());
-    passes::ResolveSymbols(&mut ctx);       debug!("after: #objs = {}", ctx.Objs.len());
+    debug!("before: #objs = {}", ctx.Objs.len());
+    passes::ResolveSymbols(&mut ctx);
+    debug!("after: #objs = {}", ctx.Objs.len());
     passes::RegisterSectionPieces(&mut ctx);
     passes::ConvertCommonSymbols(&mut ctx);
     passes::ComputeMergedSectionSizes(&mut ctx);
@@ -49,36 +51,35 @@ fn main() {
     let chunks = passes::CollectOutputSections(&mut ctx);
     ctx.Chunks.extend(chunks);
 
+    passes::ScanRelocations(&mut ctx);
     passes::ComputeSectionSizes(&mut ctx);
     passes::SortOutputSections(&mut ctx);
 
     let ctx_ptr = std::ptr::addr_of_mut!(ctx);
     // mark
-    for i in 0..ctx.Chunks.len() {
-        let c = unsafe {&mut *ctx.Chunks[i]};
-        c.UpdateShdr(ctx_ptr);
-    }
+    ctx.Chunks.iter().for_each(|c|{
+        ptr2ref_dyn(*c).UpdateShdr(ctx_ptr);
+    });
 
     let fileSz = passes::SetOutputSectionOffsets(&mut ctx);
+    ctx.Buf = vec![0; fileSz];
     debug!("file size = {fileSz}");
 
     let mut f = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
+        .truncate(true)
         .open(&ctx.Args.Output).unwrap();
 
-    ctx.Buf = vec![0; fileSz];
-
-    for i in 0..ctx.Chunks.len() {
-        let c = unsafe { &mut *ctx.Chunks[i]};
-        c.CopyBuf(ctx_ptr);
-    }
+    ctx.Chunks.iter().for_each(|c| {
+        ptr2ref_dyn(*c).CopyBuf(ctx_ptr);
+    });
 
     f.write_all(&ctx.Buf).unwrap();
+    assert!(checkMagic(&ctx.Buf));
     let ehdr = unsafe { (ctx.Buf[0..64].as_ptr() as *const Ehdr).read() };
     debug!("\n{:?}", ehdr);
-    assert!(checkMagic(&ctx.Buf));
 }
 
 pub fn parseArgs(ctx: &mut Box<Context>) -> Vec<String> {

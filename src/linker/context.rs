@@ -1,8 +1,10 @@
 //! useful informations collected and will be used during linking
 use super::common::*;
-use super::elf::{MachineType, Sym};
+use super::elf::MachineType;
+use super::gotsection::GotSection;
 use super::symbol::Symbol;
-use super::output::{OutputEhdr, OutputShdr, OutputSection, MergedSection, OutputPhdr};
+use super::output::{OutputEhdr, OutputShdr, OutputSection, OutputPhdr};
+use super::mergedsection::MergedSection;
 
 #[derive(Default)]
 pub struct ContextArgs {
@@ -23,6 +25,7 @@ pub struct Context {
     pub Ehdr:           Box<OutputEhdr>,
     pub Shdr:           Box<OutputShdr>,
     pub Phdr:           Box<OutputPhdr>,
+    pub Got:            Box<GotSection>,
     pub TpAddr:         u64,    // thread local pointer
 
     pub OutputSections: Vec<Rc<RefCell<OutputSection>>>,
@@ -38,11 +41,6 @@ pub struct Context {
     /// is not compatiable with c raw pointers. so we can't easily use std::ptr::addr_of to get the exact address
     /// &mut Rc<Refcell<T>> to *mut T:  &mut *T.as_ptr()
     pub Chunks:         Vec<*mut dyn Chunker>,
-    // before generating outputfile, we will write the output data
-    // to this internalobj. so it works as a buffer.
-    // this internalobj will also exist in ctx.objs
-    pub InternalObj:    Rc<RefCell<Objectfile>>,
-    pub InternalEsyms:  Vec<Rc<Sym>>,
 }
 
 impl Context {
@@ -53,7 +51,7 @@ impl Context {
                 Emulation: MachineType::MachineTypeNone,
                 LIbraryPaths: vec![],
             },
-            ..Default::default()
+            ..default()
         })
     }
 }
